@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+ <title>Estación de Control - Robot de Rescate S3</title>
+ <style>
+ * { box-sizing: border-box; touch-action: manipulation; }
+ body { font-family: Arial, sans-serif; background: #1a202c; color: #fff; margin: 0; padding: 10px; display: flex;
+flex-direction: column; align-items: center; } h2 { color: #63b3ed; margin: 5px 0; text-align: center; }
+ /* Configuración de IP */
+ .config-box { display: flex; gap: 5px; width: 100%; max-width: 480px; margin-bottom: 10px; }
+ .config-box input { flex: 1; padding: 8px; border-radius: 4px; border: none; font-size: 14px; }
+ .config-box button { background: #3182ce; color: white; border: none; padding: 8px 15px; border-radius: 4px;
+font-weight: bold; cursor: pointer; }
+ /* Visor de Video y Overlays de IA */
+ .video-container { position: relative; width: 100%; max-width: 480px; height: 320px; background: #000;
+border-radius: 8px; overflow: hidden; border: 2px solid #4a5568; }
+ #videoStream { width: 100%; height: 100%; object-fit: cover; }
+ .ai-overlay { position: absolute; top: 10px; left: 10px; right: 10px; pointer-events: none; display: flex;
+flex-direction: column; gap: 5px; }
+ .alert-banner { padding: 8px; border-radius: 4px; font-weight: bold; text-align: center; font-size: 13px;
+text-shadow: 1px 1px 2px #000; }
+ .status-green { background: rgba(56, 161, 105, 0.85); color: #fff; }
+ .status-yellow { background: rgba(214, 158, 46, 0.85); color: #fff; }
+ .status-red { background: rgba(229, 62, 62, 0.9); color: #fff; animation: pulse 1s infinite; }
+ @keyframes pulse { 0% { opacity: 0.7; } 50% { opacity: 1; } 100% { opacity: 0.7; } }
+ /* Bounding Box Simulado de IA */
+ .detection-box { position: absolute; border: 2px solid #00ffcc; background: rgba(0, 255, 204, 0.15); display:
+none; }
+ .detection-label { position: absolute; top: -20px; left: 0; background: #00ffcc; color: #000; font-size: 10px;
+font-weight: bold; padding: 1px 4px; border-radius: 2px; }
+ /* Panel de Toggles de IA */
+ .ia-controls { width: 100%; max-width: 480px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;
+margin: 10px 0; }
+ .toggle-btn { background: #4a5568; color: #ccc; border: 1px solid #718096; padding: 8px 2px; border-radius:
+5px; font-size: 11px; font-weight: bold; cursor: pointer; text-align: center; }
+ .toggle-btn.active { background: #319795; color: #fff; border-color: #81e6d9; }
+ /* Panel D-Pad de Control de Movimiento */
+ .dpad-container { width: 100%; max-width: 300px; display: grid; grid-template-columns: repeat(3, 1fr); gap:
+8px; margin-top: 5px; }
+ .dpad-btn { background: #2d3748; color: white; border: 2px solid #4a5568; font-size: 20px; font-weight: bold;
+height: 60px; border-radius: 8px; display: flex; align-items: center; justify-content: center; user-select: none;
+cursor: pointer; }
+ .dpad-btn:active { background: #e53e3e; border-color: #feb2b2; }
+ .dpad-btn.stop { background: #742a2a; border-color: #9b2c2c; font-size: 14px; }
+ /* Botón Alerta GPS */
+ .gps-btn { width: 100%; max-width: 480px; margin-top: 10px; background: #dd6b20; color: white; border: none;
+padding: 10px; border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; }
+ </style></head>
+<body>
+ <h2>Robot de Rescate ESP32-S3</h2>
+ <!-- Configuración IP -->
+ <div class="config-box">
+ <input type="text" id="ipAddress" value="192.168.4.1" placeholder="IP del Robot (ej. 192.168.4.1)">
+ <button onclick="conectarStream()">Conectar</button>
+ </div>
+ <!-- Visor de Transmisión -->
+ <div class="video-container">
+ <img id="videoStream" src="" alt="Stream sin conexión" onerror="this.src='';">
+ <div class="ai-overlay">
+ <div id="bannerAlerta" class="alert-banner status-green">ESTADO: PATRULLAJE NORMAL</div>
+ </div>
+ <!-- Cuadro de Detección de IA -->
+ <div id="boxDeteccion" class="detection-box" style="top: 25%; left: 30%; width: 40%; height: 50%;">
+ <span id="labelDeteccion" class="detection-label">Sujeto: Persona</span>
+ </div>
+ </div>
+ <!-- Botones para Activar/Desactivar Capas de IA -->
+ <div class="ia-controls">
+ <button id="btnObj" class="toggle-btn" onclick="toggleIA('objetos')">OBJETOS [OFF]</button>
+ <button id="btnPos" class="toggle-btn" onclick="toggleIA('postura')">POSTURA [OFF]</button>
+ <button id="btnEmo" class="toggle-btn" onclick="toggleIA('emocion')">EMOCIONES [OFF]</button>
+ </div>
+ <!-- Panel de Control D-Pad -->
+ <div class="dpad-container">
+ <div></div>
+ <div class="dpad-btn" onmousedown="enviarCmd('fwd')" onmouseup="enviarCmd('stop')"
+ontouchstart="enviarCmd('fwd')" ontouchend="enviarCmd('stop')">▲</div>
+ <div></div>
+ <div class="dpad-btn" onmousedown="enviarCmd('left')" onmouseup="enviarCmd('stop')"
+ontouchstart="enviarCmd('left')" ontouchend="enviarCmd('stop')">◄</div>
+ <div class="dpad-btn stop" onclick="enviarCmd('stop')">PARAR</div>
+ <div class="dpad-btn" onmousedown="enviarCmd('right')" onmouseup="enviarCmd('stop')"
+ontouchstart="enviarCmd('right')" ontouchend="enviarCmd('stop')">►</div>
+ <div></div>
+ <div class="dpad-btn" onmousedown="enviarCmd('back')" onmouseup="enviarCmd('stop')"
+ontouchstart="enviarCmd('back')" ontouchend="enviarCmd('stop')">▼</div>
+ <div></div>
+ </div>
+ <!-- Botón para Enviar Ubicación GPS --> <button class="gps-btn" onclick="enviarUbicacionRescate()">📍 TRANSMITIR COORDENADAS DE
+RESCATE</button>
+ <script>
+ let estadoIA = { objetos: false, postura: false, emocion: false };
+ let ipBase = "192.168.4.1";
+ function conectarStream() {
+    }
+ipBase = document.getElementById("ipAddress").value.trim();
+let streamUrl = "http://" + ipBase + ":81/stream";
+document.getElementById("videoStream").src = streamUrl;
+ function enviarCmd(dir) {
+ if(!ipBase) return;
+ fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
+ .catch(err => console.log("Comando enviado: " + dir));
+ }
+ function toggleIA(capa) {
+      }
+estadoIA[capa] = !estadoIA[capa];
+let btn = document.getElementById(capa === 'objetos' ? 'btnObj' : (capa === 'postura' ? 'btnPos' : 'btnEmo'));
+btn.classList.toggle('active', estadoIA[capa]);
+btn.innerText = capa.toUpperCase() + (estadoIA[capa] ? " [ON]" : " [OFF]");
+actualizarAnalisisVisual();
+ function actualizarAnalisisVisual() {
+   let banner = document.getElementById("bannerAlerta");
+let box = document.getElementById("boxDeteccion");
+let label = document.getElementById("labelDeteccion");
+                if (estadoIA.postura && estadoIA.emocion) {
+banner.className = "alert-banner status-red";
+banner.innerText = "🔴 ¡ALERTA ROJA! VÍCTIMA CAÍDA / ANGUSTIA";
+box.style.display = "block";
+box.style.borderColor = "#e53e3e";
+label.innerText = "VÍCTIMA: Caída | Expresión: Dolor";
+} else if (estadoIA.objetos || estadoIA.postura || estadoIA.emocion) {
+banner.className = "alert-banner status-yellow";
+banner.innerText = "🟡 ALERTA AMARILLA: INSPECCIONANDO ZONA";
+box.style.display = "block";
+box.style.borderColor = "#d69e2e";
+label.innerText = "Escaneando entorno...";
+} else {
+banner.className = "alert-banner status-green";
+banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
+box.style.display = "none"; }
+ }
+ function enviarUbicacionRescate() {
+ if ("geolocation" in navigator) {
+ navigator.geolocation.getCurrentPosition(position => {
+let lat = position.coords.latitude;
+ let lon = position.coords.longitude;
+ let mapsUrl = `https://maps.google.com/?q=${lat},${lon}`;
+ alert(`¡Ubicación de la Víctima Capturada!\nLatitud: ${lat}\nLongitud: ${lon}\n\nEnlace: ${mapsUrl}`);
+ }, () => {
+ alert("Error al obtener la localización del dispositivo.");
+  });
+ } else {
+ alert("La geolocalización no está disponible en este navegador.");
+ }
+ }
+ </script>
+</body>
+</html>
+4. Instrucciones de Uso y Demostración
