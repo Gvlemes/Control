@@ -104,7 +104,28 @@ document.getElementById("videoStream").src = streamUrl;
  .catch(err => console.log("Comando enviado: " + dir));
  }
  function toggleIA(capa) {
-      }
+  // 1. Cambia el estado local inmediatamente
+  estadoIA[capa] = !estadoIA[capa];
+
+  // 2. Actualiza la interfaz gráfica (Botón y Banner) sin esperar a la ESP
+  let btnId = capa === 'objetos' ? 'btnObj' : (capa === 'postura' ? 'btnPos' : 'btnEmo');
+  let btn = document.getElementById(btnId);
+  
+  if (btn) {
+    btn.classList.toggle('active', estadoIA[capa]);
+    btn.innerText = capa.toUpperCase() + (estadoIA[capa] ? " [ON]" : " [OFF]");
+  }
+
+  // 3. Renderiza las alertas de IA en la pantalla
+  actualizarAnalisisVisual();
+
+  // 4. Envía la orden a la ESP32-S3 en segundo plano (sin congelar la interfaz)
+  if (ipBase) {
+    let modoParam = capa === 'objetos' ? 'obj' : (capa === 'postura' ? 'pos' : 'emo');
+    fetch("http://" + ipBase + "/ia?modo=" + modoParam, { mode: 'no-cors' })
+      .catch(err => console.log("ESP no conectada aún, estado visual actualizado"));
+  }
+  }
 estadoIA[capa] = !estadoIA[capa];
 let btn = document.getElementById(capa === 'objetos' ? 'btnObj' : (capa === 'postura' ? 'btnPos' : 'btnEmo'));
 btn.classList.toggle('active', estadoIA[capa]);
