@@ -99,24 +99,31 @@ ontouchstart="enviarCmd('back')" ontouchend="enviarCmd('stop')">▼</div>
  </div>
  <!-- Botón para Enviar Ubicación GPS --> <button class="gps-btn" onclick="enviarUbicacionRescate()">📍 TRANSMITIR COORDENADAS DE
 RESCATE</button>
- <script>
+<!-- Librerías locales precargadas para visión artificial -->
+<script src="js/face-api.min.js"></script>
+
+<script>
   let estadoIA = { objetos: false, postura: false, emocion: false };
   let ipBase = "192.168.4.1";
-  let temporizadorEscaneo = null;
+  let modelosCargados = false;
+  let intervaloRostros = null;
+
+  const video = document.getElementById("videoStream");
+
+  // Cargar modelos locales de detección facial al iniciar
+  Promise.all([
+    faceapi.nets.tinyFaceDetector.loadFromUri('./models'),
+    faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
+    faceapi.nets.faceExpressionNet.loadFromUri('./models')
+  ]).then(() => {
+    modelosCargados = true;
+    console.log("Modelos de detección facial listos.");
+  });
 
   function conectarStream() {
     ipBase = document.getElementById("ipAddress").value.trim();
-    let streamUrl = "http://" + ipBase + ":81/stream";
-    document.getElementById("videoStream").src = streamUrl;
-    
-    // Iniciar el monitoreo automático al conectar
-    iniciarMonitoreoAutonomo();
-  }
-
-  function enviarCmd(dir) {
-    if(!ipBase) return;
-    fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
-      .catch(err => console.log("Comando enviado: " + dir));
+    video.crossOrigin = "anonymous";
+    video.src = "http://" + ipBase + ":81/stream";
   }
 
   function toggleIA(capa) {
@@ -130,73 +137,122 @@ RESCATE</button>
       btn.innerText = capa.toUpperCase() + (estadoIA[capa] ? " [ON]" : " [OFF]");
     }
 
-    // Reevaluar inmediatamente la escena al cambiar un modo
-    evaluarEscenaAutonoma();
+    if (estadoIA.emocion) {
+      iniciarDeteccionEmociones();
+    } else {
+      if (intervaloRostros) clearInterval(intervaloRostros);
+      evaluarEscenaEstatica();
+    }
   }
 
-  function iniciarMonitoreoAutonomo() {
-    if (temporizadorEscaneo) clearInterval(temporizadorEscaneo);
-    
-    // Escanea la imagen cada 3 segundos automáticamente
-    temporizadorEscaneo = setInterval(() => {
-      evaluarEscenaAutonoma();
-    }, 3000);
+  function iniciarDeteccionEmociones() {
+    if (intervaloRostros) clearInterval(intervaloRostros);
+
+    // Analiza la cara cada 200 ms para mantener el video fluido
+    intervaloRostros = setInterval(async () => {
+      if (!modelosCargados || !estadoIA.emocion) return;
+
+      const detecciones = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+                                       .withFaceLandmarks()
+                                       .withFaceExpressions();
+
+      let banner = document.getElementById("bannerAlerta");
+      let box = document.getElementById("boxDeteccion");
+      let label = document.getElementById("labelDeteccion");
+
+      // Ajuste del cuadro al 100% de la pantalla
+      box.style.top = "0";
+      box.style.left = "0";
+      box.style.width = "100%";
+      box.style.height = "100%";
+
+      if (detecciones.length > 0) {
+        // Extraer la emoción con mayor porcentaje de probabilidad
+        const expresiones = detecciones[0].expressions;
+        const emocionDominante = Object.keys(expresiones).reduce((a, b) => expresiones[a] > expresiones[b] ? a : b);
+        const certeza = Math.round(expresiones[emocionDominante] * 100);
+
+        // Traducción de emociones detectadas
+        const traduccionEmociones = {
+          sad: "Tristeza / Dolor",
+          fearful: "Miedo / Angustia",
+          angry: "Frustración / Agitación",
+          surprised: "Sorprendido / Alerta",
+          happy: "Consciente / Calmo",
+          disgusted: "Malestar General",
+          neutral: "Estable / Neutro"
+        };
+
+        let emocionTraducida = traduccionEmociones[emocionDominante] || "Desconocido";
+
+        // Clasificación de severidad según el estado detectado
+        if (["sad", "fearful", "angry", "disgusted"].includes(emocionDominante)) {
+          banner.className = "alert-banner status-red";
+          banner.innerText = `🔴 ¡ALERTA ROJA! VÍCTIMA EN ANGUSTIA (${emocionTraducida.toUpperCase()} ${certeza}%)`;
+          box.style.borderColor = "#ef4444";
+          label.style.backgroundColor = "#ef4444";
+          label.style.color = "#fff";
+        } else {
+          banner.className = "alert-banner status-yellow";
+          banner.innerText = `🟡 ALERTA AMARILLA: PERSONA ESTABLE (${emocionTraducida.toUpperCase()} ${certeza}%)`;
+          box.style.borderColor = "#eab308";
+          label.style.backgroundColor = "#eab308";
+          label.style.color = "#000";
+        }
+
+        box.style.display = "block";
+        label.innerText = `Rostro Detectado: ${emocionTraducida} (${certeza}% precisión)`;
+      } else {
+        // Si el botón está activado pero no hay nadie en cámara
+        banner.className = "alert-banner status-yellow";
+        banner.innerText = "🟡 ESCANEANDO FACIALMENTE: BUSCANDO ROSTROS...";
+        box.style.display = "none";
+      }
+    }, 200);
   }
 
-  function evaluarEscenaAutonoma() {
+  function evaluarEscenaEstatica() {
     let banner = document.getElementById("bannerAlerta");
     let box = document.getElementById("boxDeteccion");
     let label = document.getElementById("labelDeteccion");
 
-    // Verificar si hay al menos un modo de IA activo
-    let algunModoActivo = estadoIA.objetos || estadoIA.postura || estadoIA.emocion;
-
-    if (!algunModoActivo) {
+    if (!estadoIA.objetos && !estadoIA.postura) {
       banner.className = "alert-banner status-green";
       banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
       box.style.display = "none";
       return;
     }
 
-    // PRIORIDAD 1: Si EMOCIONES está activo -> Dispara Alerta Roja
-    if (estadoIA.emocion) {
-      banner.className = "alert-banner status-red";
-      banner.innerText = "🔴 ¡ALERTA ROJA! VÍCTIMA EN ANGUSTIA / DOLOR DETECTADO";
-      box.style.display = "block";
-      box.style.borderColor = "#ef4444";
-      label.style.color = "#ef4444";
-      label.innerText = "Sujeto: Persona | Estado: Angustia / Dolor";
-    } 
-    // PRIORIDAD 2: Si POSTURA está activo -> Dispara Alerta Amarilla
-    else if (estadoIA.postura) {
+    box.style.top = "0";
+    box.style.left = "0";
+    box.style.width = "100%";
+    box.style.height = "100%";
+
+    if (estadoIA.postura) {
       banner.className = "alert-banner status-yellow";
       banner.innerText = "🟡 ALERTA AMARILLA: PERSONA DETECTADA EN LA ZONA";
       box.style.display = "block";
       box.style.borderColor = "#eab308";
-      label.style.color = "#eab308";
-      label.innerText = "Sujeto: Persona | Estado: Consciente / Estable";
-    } 
-    // PRIORIDAD 3: Si solo OBJETOS está activo -> Dispara marco Verde
-    else if (estadoIA.objetos) {
+      label.style.backgroundColor = "#eab308";
+      label.style.color = "#000";
+      label.innerText = "Sujeto: Persona | Postura: Detectada";
+    } else if (estadoIA.objetos) {
       banner.className = "alert-banner status-green";
-      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL (OBJETO ENCONTRADO)";
+      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL (OBSTÁCULO)";
       box.style.display = "block";
       box.style.borderColor = "#22c55e";
-      label.style.color = "#22c55e";
-      label.innerText = "Objeto: Escombros / Estructura";
+      label.style.backgroundColor = "#22c55e";
+      label.style.color = "#000";
+      label.innerText = "Objeto Identificado: Obstáculo de Ruta";
     }
   }
 
-  function enviarUbicacionRescate() {
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(position => {
-        let lat = position.coords.latitude;
-        let lon = position.coords.longitude;
-        alert(`Ubicación Capturada:\nLat: ${lat}\nLon: ${lon}`);
-      });
-    }
+  function enviarCmd(dir) {
+    if (!ipBase) return;
+    fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
+      .catch(err => console.log("Comando enviado: " + dir));
   }
- </script>
+</script>
 </body>
 </html>
 ELECTROROBOTS 
