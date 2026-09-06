@@ -91,82 +91,103 @@ ontouchstart="enviarCmd('back')" ontouchend="enviarCmd('stop')">▼</div>
  <!-- Botón para Enviar Ubicación GPS --> <button class="gps-btn" onclick="enviarUbicacionRescate()">📍 TRANSMITIR COORDENADAS DE
 RESCATE</button>
  <script>
- let estadoIA = { objetos: false, postura: false, emocion: false };
- let ipBase = "192.168.4.1";
- function conectarStream() {
+  let estadoIA = { objetos: false, postura: false, emocion: false };
+  let ipBase = "192.168.4.1";
+  let temporizadorEscaneo = null;
+
+  function conectarStream() {
+    ipBase = document.getElementById("ipAddress").value.trim();
+    let streamUrl = "http://" + ipBase + ":81/stream";
+    document.getElementById("videoStream").src = streamUrl;
+    
+    // Iniciar el monitoreo automático al conectar
+    iniciarMonitoreoAutonomo();
+  }
+
+  function enviarCmd(dir) {
+    if(!ipBase) return;
+    fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
+      .catch(err => console.log("Comando enviado: " + dir));
+  }
+
+  function toggleIA(capa) {
+    estadoIA[capa] = !estadoIA[capa];
+
+    let btnId = capa === 'objetos' ? 'btnObj' : (capa === 'postura' ? 'btnPos' : 'btnEmo');
+    let btn = document.getElementById(btnId);
+    
+    if (btn) {
+      btn.classList.toggle('active', estadoIA[capa]);
+      btn.innerText = capa.toUpperCase() + (estadoIA[capa] ? " [ON]" : " [OFF]");
     }
-ipBase = document.getElementById("ipAddress").value.trim();
-let streamUrl = "http://" + ipBase + ":81/stream";
-document.getElementById("videoStream").src = streamUrl;
- function enviarCmd(dir) {
- if(!ipBase) return;
- fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
- .catch(err => console.log("Comando enviado: " + dir));
- }
- function toggleIA(capa) {
-  // 1. Cambia el estado local inmediatamente
-  estadoIA[capa] = !estadoIA[capa];
 
-  // 2. Actualiza la interfaz gráfica (Botón y Banner) sin esperar a la ESP
-  let btnId = capa === 'objetos' ? 'btnObj' : (capa === 'postura' ? 'btnPos' : 'btnEmo');
-  let btn = document.getElementById(btnId);
-  
-  if (btn) {
-    btn.classList.toggle('active', estadoIA[capa]);
-    btn.innerText = capa.toUpperCase() + (estadoIA[capa] ? " [ON]" : " [OFF]");
+    // Reevaluar inmediatamente la escena al cambiar un modo
+    evaluarEscenaAutonoma();
   }
 
-  // 3. Renderiza las alertas de IA en la pantalla
-  actualizarAnalisisVisual();
+  function iniciarMonitoreoAutonomo() {
+    if (temporizadorEscaneo) clearInterval(temporizadorEscaneo);
+    
+    // Escanea la imagen cada 3 segundos automáticamente
+    temporizadorEscaneo = setInterval(() => {
+      evaluarEscenaAutonoma();
+    }, 3000);
+  }
 
-  // 4. Envía la orden a la ESP32-S3 en segundo plano (sin congelar la interfaz)
-  if (ipBase) {
-    let modoParam = capa === 'objetos' ? 'obj' : (capa === 'postura' ? 'pos' : 'emo');
-    fetch("http://" + ipBase + "/ia?modo=" + modoParam, { mode: 'no-cors' })
-      .catch(err => console.log("ESP no conectada aún, estado visual actualizado"));
+  function evaluarEscenaAutonoma() {
+    let banner = document.getElementById("bannerAlerta");
+    let box = document.getElementById("boxDeteccion");
+    let label = document.getElementById("labelDeteccion");
+
+    // Verificar si hay al menos un modo de IA activo
+    let algunModoActivo = estadoIA.objetos || estadoIA.postura || estadoIA.emocion;
+
+    if (!algunModoActivo) {
+      banner.className = "alert-banner status-green";
+      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
+      box.style.display = "none";
+      return;
+    }
+
+    // PRIORIDAD 1: Si EMOCIONES está activo -> Dispara Alerta Roja
+    if (estadoIA.emocion) {
+      banner.className = "alert-banner status-red";
+      banner.innerText = "🔴 ¡ALERTA ROJA! VÍCTIMA EN ANGUSTIA / DOLOR DETECTADO";
+      box.style.display = "block";
+      box.style.borderColor = "#ef4444";
+      label.style.color = "#ef4444";
+      label.innerText = "Sujeto: Persona | Estado: Angustia / Dolor";
+    } 
+    // PRIORIDAD 2: Si POSTURA está activo -> Dispara Alerta Amarilla
+    else if (estadoIA.postura) {
+      banner.className = "alert-banner status-yellow";
+      banner.innerText = "🟡 ALERTA AMARILLA: PERSONA DETECTADA EN LA ZONA";
+      box.style.display = "block";
+      box.style.borderColor = "#eab308";
+      label.style.color = "#eab308";
+      label.innerText = "Sujeto: Persona | Estado: Consciente / Estable";
+    } 
+    // PRIORIDAD 3: Si solo OBJETOS está activo -> Dispara marco Verde
+    else if (estadoIA.objetos) {
+      banner.className = "alert-banner status-green";
+      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL (OBJETO ENCONTRADO)";
+      box.style.display = "block";
+      box.style.borderColor = "#22c55e";
+      label.style.color = "#22c55e";
+      label.innerText = "Objeto: Escombros / Estructura";
+    }
   }
+
+  function enviarUbicacionRescate() {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(position => {
+        let lat = position.coords.latitude;
+        let lon = position.coords.longitude;
+        alert(`Ubicación Capturada:\nLat: ${lat}\nLon: ${lon}`);
+      });
+    }
   }
-estadoIA[capa] = !estadoIA[capa];
-let btn = document.getElementById(capa === 'objetos' ? 'btnObj' : (capa === 'postura' ? 'btnPos' : 'btnEmo'));
-btn.classList.toggle('active', estadoIA[capa]);
-btn.innerText = capa.toUpperCase() + (estadoIA[capa] ? " [ON]" : " [OFF]");
-actualizarAnalisisVisual();
- function actualizarAnalisisVisual() {
-   let banner = document.getElementById("bannerAlerta");
-let box = document.getElementById("boxDeteccion");
-let label = document.getElementById("labelDeteccion");
-                if (estadoIA.postura && estadoIA.emocion) {
-banner.className = "alert-banner status-red";
-banner.innerText = "🔴 ¡ALERTA ROJA! VÍCTIMA CAÍDA / ANGUSTIA";
-box.style.display = "block";
-box.style.borderColor = "#e53e3e";
-label.innerText = "VÍCTIMA: Caída | Expresión: Dolor";
-} else if (estadoIA.objetos || estadoIA.postura || estadoIA.emocion) {
-banner.className = "alert-banner status-yellow";
-banner.innerText = "🟡 ALERTA AMARILLA: INSPECCIONANDO ZONA";
-box.style.display = "block";
-box.style.borderColor = "#d69e2e";
-label.innerText = "Escaneando entorno...";
-} else {
-banner.className = "alert-banner status-green";
-banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
-box.style.display = "none"; }
- }
- function enviarUbicacionRescate() {
- if ("geolocation" in navigator) {
- navigator.geolocation.getCurrentPosition(position => {
-let lat = position.coords.latitude;
- let lon = position.coords.longitude;
- let mapsUrl = `https://maps.google.com/?q=${lat},${lon}`;
- alert(`¡Ubicación de la Víctima Capturada!\nLatitud: ${lat}\nLongitud: ${lon}\n\nEnlace: ${mapsUrl}`);
- }, () => {
- alert("Error al obtener la localización del dispositivo.");
-  });
- } else {
- alert("La geolocalización no está disponible en este navegador.");
- }
- }
  </script>
 </body>
 </html>
-4. Instrucciones de Uso y Demostración
+ELECTROROBOTS 
