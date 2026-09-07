@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Estación de Control - Robot de Rescate</title>
   
-  <!-- Carga de la librería local -->
   <script src="js/face-api.min.js"></script>
 
   <style>
@@ -43,7 +42,7 @@
       background: #000; border-radius: 8px; overflow: hidden;
       display: flex; justify-content: center; align-items: center;
     }
-    video { width: 100%; height: 100%; object-fit: contain; }
+    img.stream-img { width: 100%; height: 100%; object-fit: contain; display: block; }
     canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
 
     .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }
@@ -54,17 +53,17 @@
 <body>
 
 <div class="container">
-  <h2>Robot de Rescate - Panel de Control</h2>
+  <h2>Robot de Rescate - Panel de Control MJPEG</h2>
   
   <div class="header-input">
-    <input type="text" id="ipAddress" placeholder="IP Celular (192.168.1.10:8080/video) o ESP32 (192.168.4.1:81/stream)">
+    <input type="text" id="ipAddress" placeholder="192.168.1.10:8080/video o 192.168.4.1:81/stream">
     <button onclick="conectarStream()">Conectar Video</button>
   </div>
 
   <div id="bannerAlerta" class="alert-banner status-green">🟢 ESTADO: PATRULLAJE NORMAL</div>
 
   <div class="video-container" id="stage">
-    <video id="videoStream" autoplay playsinline muted crossorigin="anonymous"></video>
+    <img id="mjpegStream" class="stream-img" crossorigin="anonymous" src="" alt="Esperando cámara...">
   </div>
 
   <div class="controls">
@@ -88,7 +87,6 @@
   let canvas = null;
   let modelosFaceListos = false;
 
-  // Carga local de modelos
   window.addEventListener('DOMContentLoaded', async () => {
     try {
       if (typeof faceapi !== 'undefined') {
@@ -98,10 +96,10 @@
           faceapi.nets.faceExpressionNet.loadFromUri('./models')
         ]);
         modelosFaceListos = true;
-        console.log("Modelos locales cargados correctamente sin internet.");
+        console.log("Modelos locales cargados correctamente.");
       }
     } catch(e) {
-      console.error("Error al cargar modelos desde ./models/", e);
+      console.error("Error al cargar modelos:", e);
     }
   });
 
@@ -112,38 +110,36 @@
     entrada = entrada.replace(/^https?:\/\//, '');
     ipBase = entrada.split('/')[0];
 
-    let streamUrl = "http://" + entrada;
-    let video = document.getElementById("videoStream");
-    
-    if (video) {
-      if (canvas) {
-        canvas.remove();
-        canvas = null;
-      }
-      video.src = streamUrl;
-      video.play().catch(() => console.log("Video listo para reproducir"));
-    }
+    let img = document.getElementById("mjpegStream");
+    img.src = "http://" + entrada;
+
+    img.onload = () => {
+      iniciarEscaneo();
+    };
   }
 
-  const video = document.getElementById('videoStream');
+  let intervaloIA = null;
 
-  video.addEventListener('play', () => {
+  function iniciarEscaneo() {
+    const img = document.getElementById('mjpegStream');
     const stage = document.getElementById('stage');
 
-    setInterval(async () => {
-      // Validar que el flujo de video ya esté cargado
-      if (video.readyState < 2 || !video.videoWidth || !video.videoHeight || video.videoWidth === 0) {
-        return;
-      }
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.style.position = 'absolute';
+      canvas.style.top = '0';
+      canvas.style.left = '0';
+      stage.appendChild(canvas);
+    }
 
-      // Crear canvas únicamente cuando el video ya entregue cuadros
-      if (!canvas) {
-        canvas = faceapi.createCanvasFromMedia(video);
-        stage.appendChild(canvas);
-      }
+    if (intervaloIA) clearInterval(intervaloIA);
 
-      const displaySize = { width: video.clientWidth, height: video.clientHeight };
-      faceapi.matchDimensions(canvas, displaySize);
+    intervaloIA = setInterval(async () => {
+      if (!img.naturalWidth || !img.naturalHeight) return;
+
+      const displaySize = { width: img.clientWidth, height: img.clientHeight };
+      canvas.width = displaySize.width;
+      canvas.height = displaySize.height;
 
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -151,9 +147,8 @@
       let deteccionRostro = false;
       let emocionPredominante = "";
 
-      // Procesar face-api.js
       if (modelosFaceListos && (estadoIA.emocion || estadoIA.postura)) {
-        const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+        const detections = await faceapi.detectAllFaces(img, new faceapi.TinyFaceDetectorOptions())
                                         .withFaceLandmarks()
                                         .withFaceExpressions();
 
@@ -166,14 +161,12 @@
           
           if (estadoIA.emocion) {
             faceapi.draw.drawFaceExpressions(canvas, resizedDetections);
-            
             let exp = resizedDetections[0].expressions;
             emocionPredominante = Object.keys(exp).reduce((a, b) => exp[a] > exp[b] ? a : b);
           }
         }
       }
 
-      // Cuadro de escaneo local
       if (estadoIA.objetos) {
         ctx.strokeStyle = '#22c55e';
         ctx.lineWidth = 2;
@@ -191,7 +184,7 @@
       actualizarBanner(deteccionRostro, emocionPredominante);
 
     }, 150);
-  });
+  }
 
   function actualizarBanner(hayRostro, emocion) {
     let banner = document.getElementById("bannerAlerta");
