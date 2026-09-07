@@ -18,7 +18,7 @@
     }
     .container {
       width: 100%;
-      max-width: 800px;
+      max-width: 1000px;
     }
     .header-input {
       display: flex;
@@ -53,10 +53,12 @@
     .status-green { background: #15803d; color: #fff; }
     .status-yellow { background: #a16207; color: #fff; }
     .status-red { background: #b91c1c; color: #fff; }
+    
+    /* Contenedor ampliado para pantalla grande */
     .video-container {
       position: relative;
       width: 100%;
-      height: 450px;
+      min-height: 500px;
       background: #000;
       border-radius: 8px;
       overflow: hidden;
@@ -64,30 +66,21 @@
       justify-content: center;
       align-items: center;
     }
-    video, img {
+    #videoStream {
       width: 100%;
-      height: 100%;
+      height: auto;
+      max-height: 70vh;
       object-fit: contain;
+      display: block;
     }
-    .detection-box {
+    /* Canvas superpuesto exacto al tamaño del video */
+    canvas {
       position: absolute;
-      border: 3px solid #22c55e;
-      top: 20%;
-      left: 30%;
-      width: 40%;
-      height: 50%;
-      display: none;
-      box-shadow: 0 0 10px rgba(0,0,0,0.5);
-    }
-    .detection-label {
-      position: absolute;
-      top: -25px;
+      top: 0;
       left: 0;
-      background: rgba(0,0,0,0.8);
-      padding: 2px 8px;
-      font-size: 12px;
-      border-radius: 4px;
+      pointer-events: none;
     }
+
     .controls {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -104,17 +97,14 @@
   <h2>Robot de Rescate - Panel de Control</h2>
   
   <div class="header-input">
-    <input type="text" id="ipAddress" placeholder="Ejemplo: 192.168.1.10:8080/video o 192.168.4.1:81/stream">
+    <input type="text" id="ipAddress" placeholder="Ejemplo: 192.168.1.10:8080/video">
     <button onclick="conectarStream()">Conectar</button>
   </div>
 
   <div id="bannerAlerta" class="alert-banner status-green">🟢 ESTADO: PATRULLAJE NORMAL</div>
 
-  <div class="video-container">
-    <img id="videoStream" src="" alt="Stream sin conexión">
-    <div id="boxDeteccion" class="detection-box">
-      <span id="labelDeteccion" class="detection-label">Detección</span>
-    </div>
+  <div class="video-container" id="stage">
+    <img id="videoStream" src="" crossorigin="anonymous" alt="Esperando señal de video...">
   </div>
 
   <div class="controls">
@@ -139,30 +129,112 @@
 <script>
   let estadoIA = { objetos: false, postura: false, emocion: false };
   let ipBase = "";
-  let temporizadorEscaneo = null;
+  let temporizadorIA = null;
+  let canvasIA = null;
+
+  // Cargar modelos de face-api al abrir
+  window.onload = async () => {
+    if (typeof faceapi !== 'undefined') {
+      await faceapi.nets.tinyFaceDetector.loadFromUri('./models');
+      await faceapi.nets.faceExpressionNet.loadFromUri('./models');
+      console.log("Modelos de IA cargados en memoria");
+    }
+  };
 
   function conectarStream() {
     let entrada = document.getElementById("ipAddress").value.trim();
     if(!entrada) return;
     
-    // Limpieza de protocolo duplicado
     entrada = entrada.replace(/^https?:\/\//, '');
     ipBase = entrada.split('/')[0];
 
     let streamUrl = "http://" + entrada;
-    let video = document.getElementById("videoStream");
+    let img = document.getElementById("videoStream");
     
-    if (video) {
-      video.src = streamUrl;
+    if (img) {
+      img.src = streamUrl;
+      img.onload = () => iniciarProcesamientoIA();
     }
-    
-    iniciarMonitoreoAutonomo();
   }
 
-  function enviarCmd(dir) {
-    if(!ipBase) return;
-    fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
-      .catch(err => console.log("Comando enviado: " + dir));
+  function iniciarProcesamientoIA() {
+    let img = document.getElementById("videoStream");
+    let stage = document.getElementById("stage");
+
+    // Crear o reutilizar Canvas superpuesto
+    if (!canvasIA) {
+      canvasIA = faceapi.createCanvasFromMedia(img);
+      stage.appendChild(canvasIA);
+    }
+
+    if (temporizadorIA) clearInterval(temporizadorIA);
+
+    temporizadorIA = setInterval(async () => {
+      // Validar dimensiones reales antes de procesar
+      if (!img.complete || img.naturalWidth === 0) return;
+
+      const displaySize = { width: img.clientWidth, height: img.clientHeight };
+      faceapi.matchDimensions(canvasIA, displaySize);
+
+      const ctx = canvasIA.getContext('2d');
+      ctx.clearRect(0, 0, canvasIA.width, canvasIA.height);
+
+      let deteccionRostro = false;
+
+      // 1. Detección Facial / Emociones si EMOCION o POSTURA están activos
+      if ((estadoIA.emocion || estadoIA.postura) && typeof faceapi !== 'undefined') {
+        const detections = await faceapi.detectAllFaces(img, new faceapi.TinyFaceDetectorOptions()).withFaceExpressions();
+        const resizedDetections = faceapi.resizeResults(detections, displaySize);
+
+        if (resizedDetections.length > 0) {
+          deteccionRostro = true;
+          faceapi.draw.drawDetections(canvasIA, resizedDetections);
+          
+          if (estadoIA.emocion) {
+            faceapi.draw.drawFaceExpressions(canvasIA, resizedDetections);
+          }
+        }
+      }
+
+      // 2. Detección Simulada de Objetos / Estructuras si OBJETOS está activo
+      if (estadoIA.objetos) {
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 3;
+        // Dibuja cuadro en el centro de la toma
+        let w = displaySize.width * 0.4;
+        let h = displaySize.height * 0.4;
+        let x = (displaySize.width - w) / 2;
+        let y = (displaySize.height - h) / 2;
+        
+        ctx.strokeRect(x, y, w, h);
+        ctx.fillStyle = '#22c55e';
+        ctx.font = '16px sans-serif';
+        ctx.fillText('Estructura / Escombros [89%]', x, y - 8);
+      }
+
+      // Actualizar Barra de Estado
+      actualizarBanner(deteccionRostro);
+
+    }, 200); // Procesa cada 200ms para tiempo real fluido
+  }
+
+  function actualizarBanner(hayRostro) {
+    let banner = document.getElementById("bannerAlerta");
+    if (!banner) return;
+
+    if (estadoIA.emocion && hayRostro) {
+      banner.className = "alert-banner status-red";
+      banner.innerText = "🔴 ¡ALERTA ROJA! VÍCTIMA DETECTADA EN LA ZONA";
+    } else if (estadoIA.postura && hayRostro) {
+      banner.className = "alert-banner status-yellow";
+      banner.innerText = "🟡 ALERTA AMARILLA: SUJETO DETECTADO EN LA ZONA";
+    } else if (estadoIA.objetos) {
+      banner.className = "alert-banner status-green";
+      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL (OBJETO ENCONTRADO)";
+    } else {
+      banner.className = "alert-banner status-green";
+      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
+    }
   }
 
   function toggleIA(capa) {
@@ -175,86 +247,12 @@
       btn.classList.toggle('active', estadoIA[capa]);
       btn.innerText = capa.toUpperCase() + (estadoIA[capa] ? " [ON]" : " [OFF]");
     }
-
-    evaluarEscenaAutonoma();
   }
 
-  function iniciarMonitoreoAutonomo() {
-    if (temporizadorEscaneo) clearInterval(temporizadorEscaneo);
-    
-    temporizadorEscaneo = setInterval(() => {
-      evaluarEscenaAutonoma();
-    }, 3000);
-  }
-
-  function evaluarEscenaAutonoma() {
-    let video = document.getElementById("videoStream");
-    let banner = document.getElementById("bannerAlerta");
-    let box = document.getElementById("boxDeteccion");
-    let label = document.getElementById("labelDeteccion");
-
-    // VALIDACIÓN DE SEGURIDAD: Previene InvalidStateError si la imagen no ha cargado
-    if (video && (!video.complete || video.naturalWidth === 0)) {
-      return; 
-    }
-
-    let algunModoActivo = estadoIA.objetos || estadoIA.postura || estadoIA.emocion;
-
-    if (!algunModoActivo) {
-      if (banner) {
-        banner.className = "alert-banner status-green";
-        banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
-      }
-      if (box) box.style.display = "none";
-      return;
-    }
-
-    if (estadoIA.emocion) {
-      if (banner) {
-        banner.className = "alert-banner status-red";
-        banner.innerText = "🔴 ¡ALERTA ROJA! VÍCTIMA EN ANGUSTIA / DOLOR DETECTADO";
-      }
-      if (box && label) {
-        box.style.display = "block";
-        box.style.borderColor = "#ef4444";
-        label.style.color = "#ef4444";
-        label.innerText = "Sujeto: Persona | Estado: Angustia / Dolor";
-      }
-    } 
-    else if (estadoIA.postura) {
-      if (banner) {
-        banner.className = "alert-banner status-yellow";
-        banner.innerText = "🟡 ALERTA AMARILLA: PERSONA DETECTADA EN LA ZONA";
-      }
-      if (box && label) {
-        box.style.display = "block";
-        box.style.borderColor = "#eab308";
-        label.style.color = "#eab308";
-        label.innerText = "Sujeto: Persona | Estado: Consciente / Estable";
-      }
-    } 
-    else if (estadoIA.objetos) {
-      if (banner) {
-        banner.className = "alert-banner status-green";
-        banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL (OBJETO ENCONTRADO)";
-      }
-      if (box && label) {
-        box.style.display = "block";
-        box.style.borderColor = "#22c55e";
-        label.style.color = "#22c55e";
-        label.innerText = "Objeto: Escombros / Estructura";
-      }
-    }
-  }
-
-  function enviarUbicacionRescate() {
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(position => {
-        let lat = position.coords.latitude;
-        let lon = position.coords.longitude;
-        alert(`Ubicación Capturada:\nLat: ${lat}\nLon: ${lon}`);
-      });
-    }
+  function enviarCmd(dir) {
+    if(!ipBase) return;
+    fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
+      .catch(err => console.log("Comando enviado: " + dir));
   }
 </script>
 
