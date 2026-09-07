@@ -201,57 +201,127 @@ RESCATE</button>
         }
 
         box.style.display = "block";
-        label.innerText = `Rostro Detectado: ${emocionTraducida} (${certeza}% precisión)`;
-      } else {
-        // Si el botón está activado pero no hay nadie en cámara
-        banner.className = "alert-banner status-yellow";
-        banner.innerText = "🟡 ESCANEANDO FACIALMENTE: BUSCANDO ROSTROS...";
-        box.style.display = "none";
-      }
-    }, 200);
+<script>
+  let estadoIA = { objetos: false, postura: false, emocion: false };
+  let ipBase = "192.168.4.1";
+  let temporizadorEscaneo = null;
+
+  function conectarStream() {
+    ipBase = document.getElementById("ipAddress").value.trim();
+    let streamUrl = "http://" + ipBase + ":81/stream";
+    let video = document.getElementById("videoStream");
+    
+    if (video) {
+      video.src = streamUrl;
+    }
+    
+    // Iniciar el monitoreo automático al conectar
+    iniciarMonitoreoAutonomo();
   }
 
-  function evaluarEscenaEstatica() {
+  function enviarCmd(dir) {
+    if(!ipBase) return;
+    fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
+      .catch(err => console.log("Comando enviado: " + dir));
+  }
+
+  function toggleIA(capa) {
+    estadoIA[capa] = !estadoIA[capa];
+
+    let btnId = capa === 'objetos' ? 'btnObj' : (capa === 'postura' ? 'btnPos' : 'btnEmo');
+    let btn = document.getElementById(btnId);
+    
+    if (btn) {
+      btn.classList.toggle('active', estadoIA[capa]);
+      btn.innerText = capa.toUpperCase() + (estadoIA[capa] ? " [ON]" : " [OFF]");
+    }
+
+    // Reevaluar inmediatamente la escena al cambiar un modo
+    evaluarEscenaAutonoma();
+  }
+
+  function iniciarMonitoreoAutonomo() {
+    if (temporizadorEscaneo) clearInterval(temporizadorEscaneo);
+    
+    // Escanea la imagen cada 3 segundos automáticamente
+    temporizadorEscaneo = setInterval(() => {
+      evaluarEscenaAutonoma();
+    }, 3000);
+  }
+
+  function evaluarEscenaAutonoma() {
+    let video = document.getElementById("videoStream");
     let banner = document.getElementById("bannerAlerta");
     let box = document.getElementById("boxDeteccion");
     let label = document.getElementById("labelDeteccion");
 
-    if (!estadoIA.objetos && !estadoIA.postura) {
-      banner.className = "alert-banner status-green";
-      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
-      box.style.display = "none";
+    // VALIDACIÓN DE SEGURIDAD: Evita el error InvalidStateError cancelando
+    // la evaluación si el video o su canvas asociado aún tienen un tamaño de 0px
+    if (video && (video.videoWidth === 0 || video.videoHeight === 0 || !video.complete)) {
+      return; 
+    }
+
+    // Verificar si hay al menos un modo de IA activo
+    let algunModoActivo = estadoIA.objetos || estadoIA.postura || estadoIA.emocion;
+
+    if (!algunModoActivo) {
+      if (banner) {
+        banner.className = "alert-banner status-green";
+        banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
+      }
+      if (box) box.style.display = "none";
       return;
     }
 
-    box.style.top = "0";
-    box.style.left = "0";
-    box.style.width = "100%";
-    box.style.height = "100%";
-
-    if (estadoIA.postura) {
-      banner.className = "alert-banner status-yellow";
-      banner.innerText = "🟡 ALERTA AMARILLA: PERSONA DETECTADA EN LA ZONA";
-      box.style.display = "block";
-      box.style.borderColor = "#eab308";
-      label.style.backgroundColor = "#eab308";
-      label.style.color = "#000";
-      label.innerText = "Sujeto: Persona | Postura: Detectada";
-    } else if (estadoIA.objetos) {
-      banner.className = "alert-banner status-green";
-      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL (OBSTÁCULO)";
-      box.style.display = "block";
-      box.style.borderColor = "#22c55e";
-      label.style.backgroundColor = "#22c55e";
-      label.style.color = "#000";
-      label.innerText = "Objeto Identificado: Obstáculo de Ruta";
+    // PRIORIDAD 1: Si EMOCIONES está activo -> Dispara Alerta Roja
+    if (estadoIA.emocion) {
+      if (banner) {
+        banner.className = "alert-banner status-red";
+        banner.innerText = "🔴 ¡ALERTA ROJA! VÍCTIMA EN ANGUSTIA / DOLOR DETECTADO";
+      }
+      if (box && label) {
+        box.style.display = "block";
+        box.style.borderColor = "#ef4444";
+        label.style.color = "#ef4444";
+        label.innerText = "Sujeto: Persona | Estado: Angustia / Dolor";
+      }
+    } 
+    // PRIORIDAD 2: Si POSTURA está activo -> Dispara Alerta Amarilla
+    else if (estadoIA.postura) {
+      if (banner) {
+        banner.className = "alert-banner status-yellow";
+        banner.innerText = "🟡 ALERTA AMARILLA: PERSONA DETECTADA EN LA ZONA";
+      }
+      if (box && label) {
+        box.style.display = "block";
+        box.style.borderColor = "#eab308";
+        label.style.color = "#eab308";
+        label.innerText = "Sujeto: Persona | Estado: Consciente / Estable";
+      }
+    } 
+    // PRIORIDAD 3: Si solo OBJETOS está activo -> Dispara marco Verde
+    else if (estadoIA.objetos) {
+      if (banner) {
+        banner.className = "alert-banner status-green";
+        banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL (OBJETO ENCONTRADO)";
+      }
+      if (box && label) {
+        box.style.display = "block";
+        box.style.borderColor = "#22c55e";
+        label.style.color = "#22c55e";
+        label.innerText = "Objeto: Escombros / Estructura";
+      }
     }
   }
 
-  function enviarCmd(dir) {
-    if (!ipBase) return;
-    fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
-      .catch(err => console.log("Comando enviado: " + dir));
-  }
+  function enviarUbicacionRescate() {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(position => {
+        let lat = position.coords.latitude;
+        let lon = position.coords.longitude;
+        alert(`Ubicación Capturada:\nLat: ${lat}\nLon: ${lon}`);
+      });
+    }
 </script>
 </body>
 </html>
