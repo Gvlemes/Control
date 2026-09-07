@@ -121,9 +121,23 @@ RESCATE</button>
   });
 
   function conectarStream() {
-    ipBase = document.getElementById("ipAddress").value.trim();
-    video.crossOrigin = "anonymous";
-    video.src = "http://" + ipBase + ":81/stream";
+  let entrada = document.getElementById("ipAddress").value.trim();
+  
+  // 1. Quitar http:// o https:// si el usuario ya lo escribió en el input
+  entrada = entrada.replace(/^https?:\/\//, '');
+
+  // 2. Armar la URL limpia sin duplicar protocolo ni puertos
+  let streamUrl = "http://" + entrada;
+
+  // Si estás conectando una app de teléfono (IP Webcam), normalmente la ruta es:
+  // let streamUrl = "http://" + entrada + "/video";
+
+  let video = document.getElementById("videoStream");
+  if (video) {
+    video.src = streamUrl;
+  }
+  
+  iniciarMonitoreoAutonomo();
   }
 
   function toggleIA(capa) {
