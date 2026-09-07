@@ -54,11 +54,10 @@
     .status-yellow { background: #a16207; color: #fff; }
     .status-red { background: #b91c1c; color: #fff; }
     
-    /* Contenedor ampliado para pantalla grande */
     .video-container {
       position: relative;
       width: 100%;
-      min-height: 500px;
+      height: 520px;
       background: #000;
       border-radius: 8px;
       overflow: hidden;
@@ -66,14 +65,11 @@
       justify-content: center;
       align-items: center;
     }
-    #videoStream {
+    video {
       width: 100%;
-      height: auto;
-      max-height: 70vh;
+      height: 100%;
       object-fit: contain;
-      display: block;
     }
-    /* Canvas superpuesto exacto al tamaño del video */
     canvas {
       position: absolute;
       top: 0;
@@ -104,7 +100,7 @@
   <div id="bannerAlerta" class="alert-banner status-green">🟢 ESTADO: PATRULLAJE NORMAL</div>
 
   <div class="video-container" id="stage">
-    <img id="videoStream" src="" crossorigin="anonymous" alt="Esperando señal de video...">
+    <video id="videoStream" autoplay playsinline crossorigin="anonymous"></video>
   </div>
 
   <div class="controls">
@@ -129,17 +125,18 @@
 <script>
   let estadoIA = { objetos: false, postura: false, emocion: false };
   let ipBase = "";
-  let temporizadorIA = null;
-  let canvasIA = null;
+  let canvas = null;
+  let modelosListos = false;
 
-  // Cargar modelos de face-api al abrir
-  window.onload = async () => {
-    if (typeof faceapi !== 'undefined') {
-      await faceapi.nets.tinyFaceDetector.loadFromUri('./models');
-      await faceapi.nets.faceExpressionNet.loadFromUri('./models');
-      console.log("Modelos de IA cargados en memoria");
-    }
-  };
+  // Cargar modelos locales de face-api desde la carpeta ./models
+  Promise.all([
+    faceapi.nets.tinyFaceDetector.loadFromUri('./models'),
+    faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
+    faceapi.nets.faceExpressionNet.loadFromUri('./models')
+  ]).then(() => {
+    modelosListos = true;
+    console.log("Modelos locales cargados correctamente desde ./models");
+  }).catch(err => console.error("Error al cargar modelos locales:", err));
 
   function conectarStream() {
     let entrada = document.getElementById("ipAddress").value.trim();
@@ -149,74 +146,61 @@
     ipBase = entrada.split('/')[0];
 
     let streamUrl = "http://" + entrada;
-    let img = document.getElementById("videoStream");
+    let video = document.getElementById("videoStream");
     
-    if (img) {
-      img.src = streamUrl;
-      img.onload = () => iniciarProcesamientoIA();
+    if (video) {
+      video.src = streamUrl;
+      video.play().catch(e => console.log("Esperando interacción para reproducir video"));
     }
   }
 
-  function iniciarProcesamientoIA() {
-    let img = document.getElementById("videoStream");
-    let stage = document.getElementById("stage");
+  const video = document.getElementById('videoStream');
 
-    // Crear o reutilizar Canvas superpuesto
-    if (!canvasIA) {
-      canvasIA = faceapi.createCanvasFromMedia(img);
-      stage.appendChild(canvasIA);
+  video.addEventListener('play', () => {
+    const stage = document.getElementById('stage');
+    
+    if (!canvas) {
+      canvas = faceapi.createCanvasFromMedia(video);
+      stage.appendChild(canvas);
     }
 
-    if (temporizadorIA) clearInterval(temporizadorIA);
+    setInterval(async () => {
+      // VALIDACIÓN DE SEGURIDAD LOCAL: Si el video aún no tiene ancho/alto mayor a 0, ignora la iteración
+      if (!video.videoWidth || !video.videoHeight || video.videoWidth === 0) {
+        return;
+      }
 
-    temporizadorIA = setInterval(async () => {
-      // Validar dimensiones reales antes de procesar
-      if (!img.complete || img.naturalWidth === 0) return;
+      const displaySize = { width: video.clientWidth, height: video.clientHeight };
+      faceapi.matchDimensions(canvas, displaySize);
 
-      const displaySize = { width: img.clientWidth, height: img.clientHeight };
-      faceapi.matchDimensions(canvasIA, displaySize);
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const ctx = canvasIA.getContext('2d');
-      ctx.clearRect(0, 0, canvasIA.width, canvasIA.height);
+      let rostroDetectado = false;
 
-      let deteccionRostro = false;
+      // Si la IA está activa y los modelos cargados, procesar detección local
+      if (modelosListos && (estadoIA.emocion || estadoIA.postura || estadoIA.objetos)) {
+        const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+                                        .withFaceLandmarks()
+                                        .withFaceExpressions();
 
-      // 1. Detección Facial / Emociones si EMOCION o POSTURA están activos
-      if ((estadoIA.emocion || estadoIA.postura) && typeof faceapi !== 'undefined') {
-        const detections = await faceapi.detectAllFaces(img, new faceapi.TinyFaceDetectorOptions()).withFaceExpressions();
         const resizedDetections = faceapi.resizeResults(detections, displaySize);
 
         if (resizedDetections.length > 0) {
-          deteccionRostro = true;
-          faceapi.draw.drawDetections(canvasIA, resizedDetections);
+          rostroDetectado = true;
+          faceapi.draw.drawDetections(canvas, resizedDetections);
+          faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
           
           if (estadoIA.emocion) {
-            faceapi.draw.drawFaceExpressions(canvasIA, resizedDetections);
+            faceapi.draw.drawFaceExpressions(canvas, resizedDetections);
           }
         }
       }
 
-      // 2. Detección Simulada de Objetos / Estructuras si OBJETOS está activo
-      if (estadoIA.objetos) {
-        ctx.strokeStyle = '#22c55e';
-        ctx.lineWidth = 3;
-        // Dibuja cuadro en el centro de la toma
-        let w = displaySize.width * 0.4;
-        let h = displaySize.height * 0.4;
-        let x = (displaySize.width - w) / 2;
-        let y = (displaySize.height - h) / 2;
-        
-        ctx.strokeRect(x, y, w, h);
-        ctx.fillStyle = '#22c55e';
-        ctx.font = '16px sans-serif';
-        ctx.fillText('Estructura / Escombros [89%]', x, y - 8);
-      }
+      actualizarBanner(rostroDetectado);
 
-      // Actualizar Barra de Estado
-      actualizarBanner(deteccionRostro);
-
-    }, 200); // Procesa cada 200ms para tiempo real fluido
-  }
+    }, 100);
+  });
 
   function actualizarBanner(hayRostro) {
     let banner = document.getElementById("bannerAlerta");
@@ -224,13 +208,13 @@
 
     if (estadoIA.emocion && hayRostro) {
       banner.className = "alert-banner status-red";
-      banner.innerText = "🔴 ¡ALERTA ROJA! VÍCTIMA DETECTADA EN LA ZONA";
+      banner.innerText = "🔴 ¡ALERTA ROJA! VÍCTIMA Y EXPRESIÓN DETECTADA";
     } else if (estadoIA.postura && hayRostro) {
       banner.className = "alert-banner status-yellow";
-      banner.innerText = "🟡 ALERTA AMARILLA: SUJETO DETECTADO EN LA ZONA";
+      banner.innerText = "🟡 ALERTA AMARILLA: ROSTRO Y POSTURA DETECTADOS";
     } else if (estadoIA.objetos) {
       banner.className = "alert-banner status-green";
-      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL (OBJETO ENCONTRADO)";
+      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL (BÚSQUEDA DE OBJETOS ACTIVADA)";
     } else {
       banner.className = "alert-banner status-green";
       banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
