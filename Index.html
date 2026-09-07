@@ -204,6 +204,136 @@
       banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
     }
   }
+<script>
+  let estadoIA = { objetos: false, postura: false, emocion: false };
+  let ipBase = "";
+  let canvas = null;
+  let modelosFaceListos = false;
+
+  // Carga local de modelos
+  window.addEventListener('DOMContentLoaded', async () => {
+    try {
+      if (typeof faceapi !== 'undefined') {
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri('./models'),
+          faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
+          faceapi.nets.faceExpressionNet.loadFromUri('./models')
+        ]);
+        modelosFaceListos = true;
+        console.log("Modelos locales cargados correctamente sin internet.");
+      }
+    } catch(e) {
+      console.error("Error al cargar modelos desde ./models/", e);
+    }
+  });
+
+  function conectarStream() {
+    let entrada = document.getElementById("ipAddress").value.trim();
+    if(!entrada) return;
+    
+    entrada = entrada.replace(/^https?:\/\//, '');
+    ipBase = entrada.split('/')[0];
+
+    let streamUrl = "http://" + entrada;
+    let video = document.getElementById("videoStream");
+    
+    if (video) {
+      // Limpiar canvas anterior si existe
+      if (canvas) {
+        canvas.remove();
+        canvas = null;
+      }
+      video.src = streamUrl;
+      video.play().catch(() => console.log("Video listo para reproducir"));
+    }
+  }
+
+  const video = document.getElementById('videoStream');
+
+  video.addEventListener('play', () => {
+    const stage = document.getElementById('stage');
+
+    let intervalo = setInterval(async () => {
+      // 1. VALIDACIÓN CLAVE: Esperar a que el video tenga dimensiones reales y esté listo (readyState >= 2)
+      if (video.readyState < 2 || !video.videoWidth || !video.videoHeight || video.videoWidth === 0) {
+        return;
+      }
+
+      // 2. Crear el Canvas SOLO cuando el video ya cargó su primer frame
+      if (!canvas) {
+        canvas = faceapi.createCanvasFromMedia(video);
+        stage.appendChild(canvas);
+      }
+
+      const displaySize = { width: video.clientWidth, height: video.clientHeight };
+      faceapi.matchDimensions(canvas, displaySize);
+
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      let deteccionRostro = false;
+      let emocionPredominante = "";
+
+      // Detección con face-api.js
+      if (modelosFaceListos && (estadoIA.emocion || estadoIA.postura)) {
+        const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+                                        .withFaceLandmarks()
+                                        .withFaceExpressions();
+
+        const resizedDetections = faceapi.resizeResults(detections, displaySize);
+
+        if (resizedDetections.length > 0) {
+          deteccionRostro = true;
+          faceapi.draw.drawDetections(canvas, resizedDetections);
+          faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+          
+          if (estadoIA.emocion) {
+            faceapi.draw.drawFaceExpressions(canvas, resizedDetections);
+            
+            let exp = resizedDetections[0].expressions;
+            emocionPredominante = Object.keys(exp).reduce((a, b) => exp[a] > exp[b] ? a : b);
+          }
+        }
+      }
+
+      // Búsqueda de objetos/zona local
+      if (estadoIA.objetos) {
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 2;
+        let boxWidth = displaySize.width * 0.4;
+        let boxHeight = displaySize.height * 0.4;
+        let posX = (displaySize.width - boxWidth) / 2;
+        let posY = (displaySize.height - boxHeight) / 2;
+
+        ctx.strokeRect(posX, posY, boxWidth, boxHeight);
+        ctx.fillStyle = '#22c55e';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('ZONA DE OBJETOS / ESTRUCTURA LOCAL', posX, posY - 8);
+      }
+
+      actualizarBanner(deteccionRostro, emocionPredominante);
+
+    }, 150);
+  });
+
+  function actualizarBanner(hayRostro, emocion) {
+    let banner = document.getElementById("bannerAlerta");
+    if (!banner) return;
+
+    if (estadoIA.emocion && hayRostro) {
+      banner.className = "alert-banner status-red";
+      banner.innerText = `🔴 ¡ALERTA ROJA! VÍCTIMA DETECTADA | EMOCIÓN: ${emocion.toUpperCase()}`;
+    } else if (estadoIA.postura && hayRostro) {
+      banner.className = "alert-banner status-yellow";
+      banner.innerText = "🟡 ALERTA AMARILLA: ROSTRO LOCALIZADO";
+    } else if (estadoIA.objetos) {
+      banner.className = "alert-banner status-green";
+      banner.innerText = "🟢 PATRULLAJE Y BÚSQUEDA LOCAL ACTIVADA";
+    } else {
+      banner.className = "alert-banner status-green";
+      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
+    }
+  }
 
   function toggleIA(capa) {
     estadoIA[capa] = !estadoIA[capa];
@@ -218,9 +348,8 @@
   function enviarCmd(dir) {
     if(!ipBase) return;
     fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
-      .catch(err => console.log("Comando enviado a hardware: " + dir));
+      .catch(err => console.log("Comando enviado: " + dir));
   }
 </script>
-
 </body>
 </html>
