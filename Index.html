@@ -1,235 +1,161 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
- <meta charset="UTF-8">
- <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
- <title>Estación de Control - Robot de Rescate S3</title>
- <style>
- * { box-sizing: border-box; touch-action: manipulation; }
- body { font-family: Arial, sans-serif; background: #1a202c; color: #fff; margin: 0; padding: 10px; display: flex;
-flex-direction: column; align-items: center; } h2 { color: #63b3ed; margin: 5px 0; text-align: center; }
- /* Configuración de IP */
- .config-box { display: flex; gap: 5px; width: 100%; max-width: 480px; margin-bottom: 10px; }
- .config-box input { flex: 1; padding: 8px; border-radius: 4px; border: none; font-size: 14px; }
- .config-box button { background: #3182ce; color: white; border: none; padding: 8px 15px; border-radius: 4px;
-font-weight: bold; cursor: pointer; }
- /* Visor de Video y Overlays de IA */
- .video-container { position: relative; width: 100%; max-width: 480px; height: 320px; background: #000;
-border-radius: 8px; overflow: hidden; border: 2px solid #4a5568; }
- #videoStream { width: 100%; height: 100%; object-fit: cover; }
- .ai-overlay { position: absolute; top: 10px; left: 10px; right: 10px; pointer-events: none; display: flex;
-flex-direction: column; gap: 5px; }
- .alert-banner { padding: 8px; border-radius: 4px; font-weight: bold; text-align: center; font-size: 13px;
-text-shadow: 1px 1px 2px #000; }
- .status-green { background: rgba(56, 161, 105, 0.85); color: #fff; }
- .status-yellow { background: rgba(214, 158, 46, 0.85); color: #fff; }
- .status-red { background: rgba(229, 62, 62, 0.9); color: #fff; animation: pulse 1s infinite; }
- @keyframes pulse { 0% { opacity: 0.7; } 50% { opacity: 1; } 100% { opacity: 0.7; } }
- / Bounding Box Simulado de IA */
- .detection-box {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  border: 3px solid #ef4444;
-  background: rgba(239, 68, 68, 0.15);
-  box-sizing: border-box;
-  display: none;
- }
- .detection-label { position: absolute; top: -20px; left: 0; background: #00ffcc; color: #000; font-size: 10px;
-font-weight: bold; padding: 1px 4px; border-radius: 2px; }
- /* Panel de Toggles de IA */
- .ia-controls { width: 100%; max-width: 480px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;
-margin: 10px 0; }
- .toggle-btn { background: #4a5568; color: #ccc; border: 1px solid #718096; padding: 8px 2px; border-radius:
-5px; font-size: 11px; font-weight: bold; cursor: pointer; text-align: center; }
- .toggle-btn.active { background: #319795; color: #fff; border-color: #81e6d9; }
- /* Panel D-Pad de Control de Movimiento */
- .dpad-container { width: 100%; max-width: 300px; display: grid; grid-template-columns: repeat(3, 1fr); gap:
-8px; margin-top: 5px; }
- .dpad-btn { background: #2d3748; color: white; border: 2px solid #4a5568; font-size: 20px; font-weight: bold;
-height: 60px; border-radius: 8px; display: flex; align-items: center; justify-content: center; user-select: none;
-cursor: pointer; }
- .dpad-btn:active { background: #e53e3e; border-color: #feb2b2; }
- .dpad-btn.stop { background: #742a2a; border-color: #9b2c2c; font-size: 14px; }
- /* Botón Alerta GPS */
- .gps-btn { width: 100%; max-width: 480px; margin-top: 10px; background: #dd6b20; color: white; border: none;
-padding: 10px; border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; }
- </style></head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Estación de Control - Robot de Rescate</title>
+  <script defer src="js/face-api.min.js"></script>
+  <style>
+    body {
+      background-color: #0f172a;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      width: 100%;
+      max-width: 800px;
+    }
+    .header-input {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #fff;
+    }
+    button {
+      padding: 10px 20px;
+      border-radius: 6px;
+      border: none;
+      background: #2563eb;
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { background: #1d4ed8; }
+    .alert-banner {
+      padding: 12px;
+      border-radius: 6px;
+      text-align: center;
+      font-weight: bold;
+      margin-bottom: 15px;
+    }
+    .status-green { background: #15803d; color: #fff; }
+    .status-yellow { background: #a16207; color: #fff; }
+    .status-red { background: #b91c1c; color: #fff; }
+    .video-container {
+      position: relative;
+      width: 100%;
+      height: 450px;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    video, img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .detection-box {
+      position: absolute;
+      border: 3px solid #22c55e;
+      top: 20%;
+      left: 30%;
+      width: 40%;
+      height: 50%;
+      display: none;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    }
+    .detection-label {
+      position: absolute;
+      top: -25px;
+      left: 0;
+      background: rgba(0,0,0,0.8);
+      padding: 2px 8px;
+      font-size: 12px;
+      border-radius: 4px;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 15px;
+    }
+    .btn-ia { background: #334155; }
+    .btn-ia.active { background: #059669; }
+  </style>
+</head>
 <body>
- <h2>Robot de Rescate ESP32-S3</h2>
- <!-- Configuración IP -->
- <div class="config-box">
- <input type="text" id="ipAddress" value="192.168.4.1" placeholder="IP del Robot (ej. 192.168.4.1)">
- <button onclick="conectarStream()">Conectar</button>
- </div>
- <!-- Visor de Transmisión -->
- <div class="video-container">
- <img id="videoStream" src="" alt="Stream sin conexión" onerror="this.src='';">
- <div class="ai-overlay">
- <div id="bannerAlerta" class="alert-banner status-green">ESTADO: PATRULLAJE NORMAL</div>
- </div>
- <!-- Cuadro de Detección de IA -->
- <div id="boxDeteccion" class="detection-box" style="top: 25%; left: 30%; width: 40%; height: 50%;">
- <span id="labelDeteccion" class="detection-label">Sujeto: Persona</span>
- </div>
- </div>
- <!-- Botones para Activar/Desactivar Capas de IA -->
- <div class="ia-controls">
- <button id="btnObj" class="toggle-btn" onclick="toggleIA('objetos')">OBJETOS [OFF]</button>
- <button id="btnPos" class="toggle-btn" onclick="toggleIA('postura')">POSTURA [OFF]</button>
- <button id="btnEmo" class="toggle-btn" onclick="toggleIA('emocion')">EMOCIONES [OFF]</button>
- </div>
- <!-- Panel de Control D-Pad -->
- <div class="dpad-container">
- <div></div>
- <div class="dpad-btn" onmousedown="enviarCmd('fwd')" onmouseup="enviarCmd('stop')"
-ontouchstart="enviarCmd('fwd')" ontouchend="enviarCmd('stop')">▲</div>
- <div></div>
- <div class="dpad-btn" onmousedown="enviarCmd('left')" onmouseup="enviarCmd('stop')"
-ontouchstart="enviarCmd('left')" ontouchend="enviarCmd('stop')">◄</div>
- <div class="dpad-btn stop" onclick="enviarCmd('stop')">PARAR</div>
- <div class="dpad-btn" onmousedown="enviarCmd('right')" onmouseup="enviarCmd('stop')"
-ontouchstart="enviarCmd('right')" ontouchend="enviarCmd('stop')">►</div>
- <div></div>
- <div class="dpad-btn" onmousedown="enviarCmd('back')" onmouseup="enviarCmd('stop')"
-ontouchstart="enviarCmd('back')" ontouchend="enviarCmd('stop')">▼</div>
- <div></div>
- </div>
- <!-- Botón para Enviar Ubicación GPS --> <button class="gps-btn" onclick="enviarUbicacionRescate()">📍 TRANSMITIR COORDENADAS DE
-RESCATE</button>
-<!-- Librerías locales precargadas para visión artificial -->
-<script src="js/face-api.min.js"></script>
+
+<div class="container">
+  <h2>Robot de Rescate - Panel de Control</h2>
+  
+  <div class="header-input">
+    <input type="text" id="ipAddress" placeholder="Ejemplo: 192.168.1.10:8080/video o 192.168.4.1:81/stream">
+    <button onclick="conectarStream()">Conectar</button>
+  </div>
+
+  <div id="bannerAlerta" class="alert-banner status-green">🟢 ESTADO: PATRULLAJE NORMAL</div>
+
+  <div class="video-container">
+    <img id="videoStream" src="" alt="Stream sin conexión">
+    <div id="boxDeteccion" class="detection-box">
+      <span id="labelDeteccion" class="detection-label">Detección</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="btnObj" class="btn-ia" onclick="toggleIA('objetos')">OBJETOS [OFF]</button>
+    <button id="btnPos" class="btn-ia" onclick="toggleIA('postura')">POSTURA [OFF]</button>
+    <button id="btnEmo" class="btn-ia" onclick="toggleIA('emocion')">EMOCIÓN [OFF]</button>
+  </div>
+
+  <div class="controls" style="margin-top: 20px;">
+    <div></div>
+    <button onclick="enviarCmd('forward')">▲ AVANZAR</button>
+    <div></div>
+    <button onclick="enviarCmd('left')">◄ IZQUIERDA</button>
+    <button onclick="enviarCmd('stop')" style="background: #dc2626;">PARAR</button>
+    <button onclick="enviarCmd('right')">DERECHA ►</button>
+    <div></div>
+    <button onclick="enviarCmd('backward')">▼ ATRÁS</button>
+    <div></div>
+  </div>
+</div>
 
 <script>
   let estadoIA = { objetos: false, postura: false, emocion: false };
-  let ipBase = "192.168.4.1";
-  let modelosCargados = false;
-  let intervaloRostros = null;
-
-  const video = document.getElementById("videoStream");
-
-  // Cargar modelos locales de detección facial al iniciar
-  Promise.all([
-    faceapi.nets.tinyFaceDetector.loadFromUri('./models'),
-    faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
-    faceapi.nets.faceExpressionNet.loadFromUri('./models')
-  ]).then(() => {
-    modelosCargados = true;
-    console.log("Modelos de detección facial listos.");
-  });
-
-  function conectarStream() {
-  let entrada = document.getElementById("ipAddress").value.trim();
-  
-  // 1. Quitar http:// o https:// si el usuario ya lo escribió en el input
-  entrada = entrada.replace(/^https?:\/\//, '');
-
-  // 2. Armar la URL limpia sin duplicar protocolo ni puertos
-  let streamUrl = "http://" + entrada;
-
-  // Si estás conectando una app de teléfono (IP Webcam), normalmente la ruta es:
-  // let streamUrl = "http://" + entrada + "/video";
-
-  let video = document.getElementById("videoStream");
-  if (video) {
-    video.src = streamUrl;
-  }
-  
-  iniciarMonitoreoAutonomo();
-  }
-
-  function toggleIA(capa) {
-    estadoIA[capa] = !estadoIA[capa];
-
-    let btnId = capa === 'objetos' ? 'btnObj' : (capa === 'postura' ? 'btnPos' : 'btnEmo');
-    let btn = document.getElementById(btnId);
-    
-    if (btn) {
-      btn.classList.toggle('active', estadoIA[capa]);
-      btn.innerText = capa.toUpperCase() + (estadoIA[capa] ? " [ON]" : " [OFF]");
-    }
-
-    if (estadoIA.emocion) {
-      iniciarDeteccionEmociones();
-    } else {
-      if (intervaloRostros) clearInterval(intervaloRostros);
-      evaluarEscenaEstatica();
-    }
-  }
-
-  function iniciarDeteccionEmociones() {
-    if (intervaloRostros) clearInterval(intervaloRostros);
-
-    // Analiza la cara cada 200 ms para mantener el video fluido
-    intervaloRostros = setInterval(async () => {
-      if (!modelosCargados || !estadoIA.emocion) return;
-
-      const detecciones = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
-                                       .withFaceLandmarks()
-                                       .withFaceExpressions();
-
-      let banner = document.getElementById("bannerAlerta");
-      let box = document.getElementById("boxDeteccion");
-      let label = document.getElementById("labelDeteccion");
-
-      // Ajuste del cuadro al 100% de la pantalla
-      box.style.top = "0";
-      box.style.left = "0";
-      box.style.width = "100%";
-      box.style.height = "100%";
-
-      if (detecciones.length > 0) {
-        // Extraer la emoción con mayor porcentaje de probabilidad
-        const expresiones = detecciones[0].expressions;
-        const emocionDominante = Object.keys(expresiones).reduce((a, b) => expresiones[a] > expresiones[b] ? a : b);
-        const certeza = Math.round(expresiones[emocionDominante] * 100);
-
-        // Traducción de emociones detectadas
-        const traduccionEmociones = {
-          sad: "Tristeza / Dolor",
-          fearful: "Miedo / Angustia",
-          angry: "Frustración / Agitación",
-          surprised: "Sorprendido / Alerta",
-          happy: "Consciente / Calmo",
-          disgusted: "Malestar General",
-          neutral: "Estable / Neutro"
-        };
-
-        let emocionTraducida = traduccionEmociones[emocionDominante] || "Desconocido";
-
-        // Clasificación de severidad según el estado detectado
-        if (["sad", "fearful", "angry", "disgusted"].includes(emocionDominante)) {
-          banner.className = "alert-banner status-red";
-          banner.innerText = `🔴 ¡ALERTA ROJA! VÍCTIMA EN ANGUSTIA (${emocionTraducida.toUpperCase()} ${certeza}%)`;
-          box.style.borderColor = "#ef4444";
-          label.style.backgroundColor = "#ef4444";
-          label.style.color = "#fff";
-        } else {
-          banner.className = "alert-banner status-yellow";
-          banner.innerText = `🟡 ALERTA AMARILLA: PERSONA ESTABLE (${emocionTraducida.toUpperCase()} ${certeza}%)`;
-          box.style.borderColor = "#eab308";
-          label.style.backgroundColor = "#eab308";
-          label.style.color = "#000";
-        }
-
-        box.style.display = "block";
-<script>
-  let estadoIA = { objetos: false, postura: false, emocion: false };
-  let ipBase = "192.168.4.1";
+  let ipBase = "";
   let temporizadorEscaneo = null;
 
   function conectarStream() {
-    ipBase = document.getElementById("ipAddress").value.trim();
-    let streamUrl = "http://" + ipBase + ":81/stream";
+    let entrada = document.getElementById("ipAddress").value.trim();
+    if(!entrada) return;
+    
+    // Limpieza de protocolo duplicado
+    entrada = entrada.replace(/^https?:\/\//, '');
+    ipBase = entrada.split('/')[0];
+
+    let streamUrl = "http://" + entrada;
     let video = document.getElementById("videoStream");
     
     if (video) {
       video.src = streamUrl;
     }
     
-    // Iniciar el monitoreo automático al conectar
     iniciarMonitoreoAutonomo();
   }
 
@@ -250,14 +176,12 @@ RESCATE</button>
       btn.innerText = capa.toUpperCase() + (estadoIA[capa] ? " [ON]" : " [OFF]");
     }
 
-    // Reevaluar inmediatamente la escena al cambiar un modo
     evaluarEscenaAutonoma();
   }
 
   function iniciarMonitoreoAutonomo() {
     if (temporizadorEscaneo) clearInterval(temporizadorEscaneo);
     
-    // Escanea la imagen cada 3 segundos automáticamente
     temporizadorEscaneo = setInterval(() => {
       evaluarEscenaAutonoma();
     }, 3000);
@@ -269,13 +193,11 @@ RESCATE</button>
     let box = document.getElementById("boxDeteccion");
     let label = document.getElementById("labelDeteccion");
 
-    // VALIDACIÓN DE SEGURIDAD: Evita el error InvalidStateError cancelando
-    // la evaluación si el video o su canvas asociado aún tienen un tamaño de 0px
-    if (video && (video.videoWidth === 0 || video.videoHeight === 0 || !video.complete)) {
+    // VALIDACIÓN DE SEGURIDAD: Previene InvalidStateError si la imagen no ha cargado
+    if (video && (!video.complete || video.naturalWidth === 0)) {
       return; 
     }
 
-    // Verificar si hay al menos un modo de IA activo
     let algunModoActivo = estadoIA.objetos || estadoIA.postura || estadoIA.emocion;
 
     if (!algunModoActivo) {
@@ -287,7 +209,6 @@ RESCATE</button>
       return;
     }
 
-    // PRIORIDAD 1: Si EMOCIONES está activo -> Dispara Alerta Roja
     if (estadoIA.emocion) {
       if (banner) {
         banner.className = "alert-banner status-red";
@@ -300,7 +221,6 @@ RESCATE</button>
         label.innerText = "Sujeto: Persona | Estado: Angustia / Dolor";
       }
     } 
-    // PRIORIDAD 2: Si POSTURA está activo -> Dispara Alerta Amarilla
     else if (estadoIA.postura) {
       if (banner) {
         banner.className = "alert-banner status-yellow";
@@ -313,7 +233,6 @@ RESCATE</button>
         label.innerText = "Sujeto: Persona | Estado: Consciente / Estable";
       }
     } 
-    // PRIORIDAD 3: Si solo OBJETOS está activo -> Dispara marco Verde
     else if (estadoIA.objetos) {
       if (banner) {
         banner.className = "alert-banner status-green";
@@ -336,7 +255,8 @@ RESCATE</button>
         alert(`Ubicación Capturada:\nLat: ${lat}\nLon: ${lon}`);
       });
     }
+  }
 </script>
+
 </body>
 </html>
-ELECTROROBOTS 
