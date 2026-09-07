@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Estación de Control - Robot de Rescate</title>
+  <title>Estación de Control - Robot de Rescate (Medición de Distancia)</title>
   
+  <!-- Carga de librería local offline -->
   <script src="js/face-api.min.js"></script>
 
   <style>
@@ -32,6 +33,7 @@
     .alert-banner {
       padding: 12px; border-radius: 6px; text-align: center;
       font-weight: bold; margin-bottom: 15px;
+      font-size: 1.1rem;
     }
     .status-green { background: #15803d; color: #fff; }
     .status-yellow { background: #a16207; color: #fff; }
@@ -53,7 +55,7 @@
 <body>
 
 <div class="container">
-  <h2>Robot de Rescate - Panel de Control MJPEG</h2>
+  <h2>Robot de Rescate - Telemetría y Distancia Estimada</h2>
   
   <div class="header-input">
     <input type="text" id="ipAddress" placeholder="192.168.1.10:8080/video o 192.168.4.1:81/stream">
@@ -63,15 +65,16 @@
   <div id="bannerAlerta" class="alert-banner status-green">🟢 ESTADO: PATRULLAJE NORMAL</div>
 
   <div class="video-container" id="stage">
-    <img id="mjpegStream" class="stream-img" crossorigin="anonymous" src="" alt="Esperando cámara...">
+    <img id="mjpegStream" class="stream-img" crossorigin="anonymous" src="" alt="Esperando video de la cámara...">
   </div>
 
   <div class="controls">
-    <button id="btnObj" class="btn-ia" onclick="toggleIA('objetos')">OBJETOS / RANGOS [OFF]</button>
-    <button id="btnPos" class="btn-ia" onclick="toggleIA('postura')">ROSTRO / POSTURA [OFF]</button>
+    <button id="btnObj" class="btn-ia" onclick="toggleIA('objetos')">ZONA / RANGOS [OFF]</button>
+    <button id="btnPos" class="btn-ia" onclick="toggleIA('postura')">ROSTRO / DISTANCIA [OFF]</button>
     <button id="btnEmo" class="btn-ia" onclick="toggleIA('emocion')">EMOCIÓN [OFF]</button>
   </div>
 
+  <!-- Teclado de control de motores -->
   <div class="controls" style="margin-top: 20px;">
     <div></div><button onclick="enviarCmd('forward')">▲ AVANZAR</button><div></div>
     <button onclick="enviarCmd('left')">◄ IZQUIERDA</button>
@@ -86,7 +89,14 @@
   let ipBase = "";
   let canvas = null;
   let modelosFaceListos = false;
+  let escaneoActivo = false;
 
+  // Constante focal estimada para cámaras web de celular/ESP32 (se ajusta según tu lente)
+  // Ancho promedio de un rostro humano = 16 cm
+  const ANCHO_ROSTRO_REAL_CM = 16.0; 
+  const FOCAL_LENGTH = 500; // Valor de calibración estándar en píxeles
+
+  // Carga local de modelos face-api
   window.addEventListener('DOMContentLoaded', async () => {
     try {
       if (typeof faceapi !== 'undefined') {
@@ -96,10 +106,10 @@
           faceapi.nets.faceExpressionNet.loadFromUri('./models')
         ]);
         modelosFaceListos = true;
-        console.log("Modelos locales cargados correctamente.");
+        console.log("Modelos locales e IA cargados.");
       }
     } catch(e) {
-      console.error("Error al cargar modelos:", e);
+      console.error("Error al cargar modelos desde ./models/", e);
     }
   });
 
@@ -114,28 +124,28 @@
     img.src = "http://" + entrada;
 
     img.onload = () => {
-      iniciarEscaneo();
+      if (!escaneoActivo) {
+        escaneoActivo = true;
+        loopEscaneo();
+      }
     };
   }
 
-  let intervaloIA = null;
+  // Bucle asíncrono para mantener procesamiento constante sin saturar CPU
+  async function loopEscaneo() {
+    if (!escaneoActivo) return;
 
-  function iniciarEscaneo() {
     const img = document.getElementById('mjpegStream');
     const stage = document.getElementById('stage');
 
-    if (!canvas) {
-      canvas = document.createElement('canvas');
-      canvas.style.position = 'absolute';
-      canvas.style.top = '0';
-      canvas.style.left = '0';
-      stage.appendChild(canvas);
-    }
-
-    if (intervaloIA) clearInterval(intervaloIA);
-
-    intervaloIA = setInterval(async () => {
-      if (!img.naturalWidth || !img.naturalHeight) return;
+    if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+      if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.style.position = 'absolute';
+        canvas.style.top = '0';
+        canvas.style.left = '0';
+        stage.appendChild(canvas);
+      }
 
       const displaySize = { width: img.clientWidth, height: img.clientHeight };
       canvas.width = displaySize.width;
@@ -146,24 +156,46 @@
 
       let deteccionRostro = false;
       let emocionPredominante = "";
+      let distanciaCalculadaCm = 0;
 
       if (modelosFaceListos && (estadoIA.emocion || estadoIA.postura)) {
-        const detections = await faceapi.detectAllFaces(img, new faceapi.TinyFaceDetectorOptions())
-                                        .withFaceLandmarks()
-                                        .withFaceExpressions();
+        const opcionesTiny = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+        
+        try {
+          const detections = await faceapi.detectAllFaces(img, opcionesTiny)
+                                          .withFaceLandmarks()
+                                          .withFaceExpressions();
 
-        const resizedDetections = faceapi.resizeResults(detections, displaySize);
+          const resizedDetections = faceapi.resizeResults(detections, displaySize);
 
-        if (resizedDetections.length > 0) {
-          deteccionRostro = true;
-          faceapi.draw.drawDetections(canvas, resizedDetections);
-          faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
-          
-          if (estadoIA.emocion) {
-            faceapi.draw.drawFaceExpressions(canvas, resizedDetections);
-            let exp = resizedDetections[0].expressions;
-            emocionPredominante = Object.keys(exp).reduce((a, b) => exp[a] > exp[b] ? a : b);
+          if (resizedDetections.length > 0) {
+            deteccionRostro = true;
+            
+            // Dibujar bounding box y landmarks
+            faceapi.draw.drawDetections(canvas, resizedDetections);
+            faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+
+            // CÁLCULO MATEMÁTICO DE DISTANCIA
+            const box = resizedDetections[0].detection.box;
+            const anchoPixeles = box.width;
+            
+            if (anchoPixeles > 0) {
+              distanciaCalculadaCm = Math.round((ANCHO_ROSTRO_REAL_CM * FOCAL_LENGTH) / anchoPixeles);
+            }
+
+            // Dibujar etiqueta de distancia sobre la cabeza
+            ctx.fillStyle = '#facc15';
+            ctx.font = 'bold 16px sans-serif';
+            ctx.fillText(`DISTANCIA: ${distanciaCalculadaCm} cm (${(distanciaCalculadaCm/100).toFixed(2)} m)`, box.x, box.y - 10);
+
+            if (estadoIA.emocion) {
+              faceapi.draw.drawFaceExpressions(canvas, resizedDetections);
+              let exp = resizedDetections[0].expressions;
+              emocionPredominante = Object.keys(exp).reduce((a, b) => exp[a] > exp[b] ? a : b);
+            }
           }
+        } catch (err) {
+          console.warn("Cuadro omitido:", err);
         }
       }
 
@@ -181,21 +213,22 @@
         ctx.fillText('ZONA DE OBJETOS / ESTRUCTURA LOCAL', posX, posY - 8);
       }
 
-      actualizarBanner(deteccionRostro, emocionPredominante);
+      actualizarBanner(deteccionRostro, emocionPredominante, distanciaCalculadaCm);
+    }
 
-    }, 150);
+    setTimeout(loopEscaneo, 40);
   }
 
-  function actualizarBanner(hayRostro, emocion) {
+  function actualizarBanner(hayRostro, emocion, distancia) {
     let banner = document.getElementById("bannerAlerta");
     if (!banner) return;
 
     if (estadoIA.emocion && hayRostro) {
       banner.className = "alert-banner status-red";
-      banner.innerText = `🔴 ¡ALERTA ROJA! VÍCTIMA DETECTADA | EMOCIÓN: ${emocion.toUpperCase()}`;
+      banner.innerText = `🔴 ¡ALERTA ROJA! VÍCTIMA A ${distancia} cm (${(distancia/100).toFixed(2)} m) | EMOCIÓN: ${emocion.toUpperCase()}`;
     } else if (estadoIA.postura && hayRostro) {
       banner.className = "alert-banner status-yellow";
-      banner.innerText = "🟡 ALERTA AMARILLA: ROSTRO LOCALIZADO";
+      banner.innerText = `🟡 ALERTA AMARILLA: SUJETO DETECTADO A ${distancia} cm (${(distancia/100).toFixed(2)} m)`;
     } else if (estadoIA.objetos) {
       banner.className = "alert-banner status-green";
       banner.innerText = "🟢 PATRULLAJE Y BÚSQUEDA LOCAL ACTIVADA";
@@ -218,7 +251,7 @@
   function enviarCmd(dir) {
     if(!ipBase) return;
     fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
-      .catch(err => console.log("Comando enviado: " + dir));
+      .catch(err => console.log("Comando enviado al robot: " + dir));
   }
 </script>
 
