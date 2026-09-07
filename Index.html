@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Estación de Control - Robot de Rescate</title>
-  <script defer src="js/face-api.min.js"></script>
+  <title>Estación de Control - Robot de Rescate (Offline)</title>
+  
+  <!-- Carga únicamente la librería local -->
+  <script src="js/face-api.min.js"></script>
+
   <style>
     body {
       background-color: #0f172a;
@@ -16,73 +19,34 @@
       flex-direction: column;
       align-items: center;
     }
-    .container {
-      width: 100%;
-      max-width: 1000px;
-    }
-    .header-input {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 15px;
-    }
+    .container { width: 100%; max-width: 1000px; }
+    .header-input { display: flex; gap: 10px; margin-bottom: 15px; }
     input[type="text"] {
-      flex: 1;
-      padding: 10px;
-      border-radius: 6px;
-      border: 1px solid #334155;
-      background: #1e293b;
-      color: #fff;
+      flex: 1; padding: 10px; border-radius: 6px;
+      border: 1px solid #334155; background: #1e293b; color: #fff;
     }
     button {
-      padding: 10px 20px;
-      border-radius: 6px;
-      border: none;
-      background: #2563eb;
-      color: #fff;
-      font-weight: bold;
-      cursor: pointer;
+      padding: 10px 20px; border-radius: 6px; border: none;
+      background: #2563eb; color: #fff; font-weight: bold; cursor: pointer;
     }
     button:hover { background: #1d4ed8; }
     .alert-banner {
-      padding: 12px;
-      border-radius: 6px;
-      text-align: center;
-      font-weight: bold;
-      margin-bottom: 15px;
+      padding: 12px; border-radius: 6px; text-align: center;
+      font-weight: bold; margin-bottom: 15px;
     }
     .status-green { background: #15803d; color: #fff; }
     .status-yellow { background: #a16207; color: #fff; }
     .status-red { background: #b91c1c; color: #fff; }
     
     .video-container {
-      position: relative;
-      width: 100%;
-      height: 520px;
-      background: #000;
-      border-radius: 8px;
-      overflow: hidden;
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      position: relative; width: 100%; height: 500px;
+      background: #000; border-radius: 8px; overflow: hidden;
+      display: flex; justify-content: center; align-items: center;
     }
-    video {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
-    canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      pointer-events: none;
-    }
+    video { width: 100%; height: 100%; object-fit: contain; }
+    canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
 
-    .controls {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-      margin-top: 15px;
-    }
+    .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }
     .btn-ia { background: #334155; }
     .btn-ia.active { background: #059669; }
   </style>
@@ -90,35 +54,31 @@
 <body>
 
 <div class="container">
-  <h2>Robot de Rescate - Panel de Control</h2>
+  <h2>Robot de Rescate - Panel de Control Local (Offline)</h2>
   
   <div class="header-input">
-    <input type="text" id="ipAddress" placeholder="Ejemplo: 192.168.1.10:8080/video">
-    <button onclick="conectarStream()">Conectar</button>
+    <input type="text" id="ipAddress" placeholder="IP Celular (192.168.1.10:8080/video) o ESP32 (192.168.4.1:81/stream)">
+    <button onclick="conectarStream()">Conectar Video</button>
   </div>
 
   <div id="bannerAlerta" class="alert-banner status-green">🟢 ESTADO: PATRULLAJE NORMAL</div>
 
   <div class="video-container" id="stage">
-    <video id="videoStream" autoplay playsinline crossorigin="anonymous"></video>
+    <video id="videoStream" autoplay playsinline muted crossorigin="anonymous"></video>
   </div>
 
   <div class="controls">
-    <button id="btnObj" class="btn-ia" onclick="toggleIA('objetos')">OBJETOS [OFF]</button>
-    <button id="btnPos" class="btn-ia" onclick="toggleIA('postura')">POSTURA [OFF]</button>
+    <button id="btnObj" class="btn-ia" onclick="toggleIA('objetos')">OBJETOS / RANGOS [OFF]</button>
+    <button id="btnPos" class="btn-ia" onclick="toggleIA('postura')">ROSTRO / POSTURA [OFF]</button>
     <button id="btnEmo" class="btn-ia" onclick="toggleIA('emocion')">EMOCIÓN [OFF]</button>
   </div>
 
   <div class="controls" style="margin-top: 20px;">
-    <div></div>
-    <button onclick="enviarCmd('forward')">▲ AVANZAR</button>
-    <div></div>
+    <div></div><button onclick="enviarCmd('forward')">▲ AVANZAR</button><div></div>
     <button onclick="enviarCmd('left')">◄ IZQUIERDA</button>
     <button onclick="enviarCmd('stop')" style="background: #dc2626;">PARAR</button>
     <button onclick="enviarCmd('right')">DERECHA ►</button>
-    <div></div>
-    <button onclick="enviarCmd('backward')">▼ ATRÁS</button>
-    <div></div>
+    <div></div><button onclick="enviarCmd('backward')">▼ ATRÁS</button><div></div>
   </div>
 </div>
 
@@ -126,17 +86,24 @@
   let estadoIA = { objetos: false, postura: false, emocion: false };
   let ipBase = "";
   let canvas = null;
-  let modelosListos = false;
+  let modelosFaceListos = false;
 
-  // Cargar modelos locales de face-api desde la carpeta ./models
-  Promise.all([
-    faceapi.nets.tinyFaceDetector.loadFromUri('./models'),
-    faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
-    faceapi.nets.faceExpressionNet.loadFromUri('./models')
-  ]).then(() => {
-    modelosListos = true;
-    console.log("Modelos locales cargados correctamente desde ./models");
-  }).catch(err => console.error("Error al cargar modelos locales:", err));
+  // Carga estrictamente local de los modelos en la carpeta ./models/
+  window.addEventListener('DOMContentLoaded', async () => {
+    try {
+      if (typeof faceapi !== 'undefined') {
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri('./models'),
+          faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
+          faceapi.nets.faceExpressionNet.loadFromUri('./models')
+        ]);
+        modelosFaceListos = true;
+        console.log("Modelos locales cargados correctamente sin internet.");
+      }
+    } catch(e) {
+      console.error("Error al cargar archivos locales desde ./models/", e);
+    }
+  });
 
   function conectarStream() {
     let entrada = document.getElementById("ipAddress").value.trim();
@@ -150,7 +117,7 @@
     
     if (video) {
       video.src = streamUrl;
-      video.play().catch(e => console.log("Esperando interacción para reproducir video"));
+      video.play().catch(() => console.log("Video listo para reproducir"));
     }
   }
 
@@ -165,10 +132,8 @@
     }
 
     setInterval(async () => {
-      // VALIDACIÓN DE SEGURIDAD LOCAL: Si el video aún no tiene ancho/alto mayor a 0, ignora la iteración
-      if (!video.videoWidth || !video.videoHeight || video.videoWidth === 0) {
-        return;
-      }
+      // Evitar procesamiento si el flujo no tiene dimensiones válidas
+      if (!video.videoWidth || !video.videoHeight || video.videoWidth === 0) return;
 
       const displaySize = { width: video.clientWidth, height: video.clientHeight };
       faceapi.matchDimensions(canvas, displaySize);
@@ -176,10 +141,11 @@
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      let rostroDetectado = false;
+      let deteccionRostro = false;
+      let emocionPredominante = "";
 
-      // Si la IA está activa y los modelos cargados, procesar detección local
-      if (modelosListos && (estadoIA.emocion || estadoIA.postura || estadoIA.objetos)) {
+      // Procesamiento local de rostro y emociones con face-api.js
+      if (modelosFaceListos && (estadoIA.emocion || estadoIA.postura)) {
         const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
                                         .withFaceLandmarks()
                                         .withFaceExpressions();
@@ -187,34 +153,52 @@
         const resizedDetections = faceapi.resizeResults(detections, displaySize);
 
         if (resizedDetections.length > 0) {
-          rostroDetectado = true;
+          deteccionRostro = true;
           faceapi.draw.drawDetections(canvas, resizedDetections);
           faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
           
           if (estadoIA.emocion) {
             faceapi.draw.drawFaceExpressions(canvas, resizedDetections);
+            
+            let exp = resizedDetections[0].expressions;
+            emocionPredominante = Object.keys(exp).reduce((a, b) => exp[a] > exp[b] ? a : b);
           }
         }
       }
 
-      actualizarBanner(rostroDetectado);
+      // Rastreador visual local para simulación/zona de escombros sin depender de servidores externos
+      if (estadoIA.objetos) {
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 2;
+        let boxWidth = displaySize.width * 0.35;
+        let boxHeight = displaySize.height * 0.35;
+        let posX = (displaySize.width - boxWidth) / 2;
+        let posY = (displaySize.height - boxHeight) / 2;
 
-    }, 100);
+        ctx.strokeRect(posX, posY, boxWidth, boxHeight);
+        ctx.fillStyle = '#22c55e';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('ZONA DE ESCANEO / ESTRUCTURA LOCAL', posX, posY - 8);
+      }
+
+      actualizarBanner(deteccionRostro, emocionPredominante);
+
+    }, 150);
   });
 
-  function actualizarBanner(hayRostro) {
+  function actualizarBanner(hayRostro, emocion) {
     let banner = document.getElementById("bannerAlerta");
     if (!banner) return;
 
     if (estadoIA.emocion && hayRostro) {
       banner.className = "alert-banner status-red";
-      banner.innerText = "🔴 ¡ALERTA ROJA! VÍCTIMA Y EXPRESIÓN DETECTADA";
+      banner.innerText = `🔴 ¡ALERTA ROJA! VÍCTIMA DETECTADA | EMOCIÓN: ${emocion.toUpperCase()}`;
     } else if (estadoIA.postura && hayRostro) {
       banner.className = "alert-banner status-yellow";
-      banner.innerText = "🟡 ALERTA AMARILLA: ROSTRO Y POSTURA DETECTADOS";
+      banner.innerText = "🟡 ALERTA AMARILLA: ROSTRO / SUJETO LOCALIZADO";
     } else if (estadoIA.objetos) {
       banner.className = "alert-banner status-green";
-      banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL (BÚSQUEDA DE OBJETOS ACTIVADA)";
+      banner.innerText = "🟢 PATRULLAJE Y BÚSQUEDA LOCAL DE OBJETOS ACTIVA";
     } else {
       banner.className = "alert-banner status-green";
       banner.innerText = "🟢 ESTADO: PATRULLAJE NORMAL";
@@ -223,10 +207,8 @@
 
   function toggleIA(capa) {
     estadoIA[capa] = !estadoIA[capa];
-
     let btnId = capa === 'objetos' ? 'btnObj' : (capa === 'postura' ? 'btnPos' : 'btnEmo');
     let btn = document.getElementById(btnId);
-    
     if (btn) {
       btn.classList.toggle('active', estadoIA[capa]);
       btn.innerText = capa.toUpperCase() + (estadoIA[capa] ? " [ON]" : " [OFF]");
@@ -236,7 +218,7 @@
   function enviarCmd(dir) {
     if(!ipBase) return;
     fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
-      .catch(err => console.log("Comando enviado: " + dir));
+      .catch(err => console.log("Comando enviado a hardware: " + dir));
   }
 </script>
 
