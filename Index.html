@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Estación de Control - Robot de Rescate (Medición de Distancia)</title>
+  <title>Estación de Control - Robot de Rescate</title>
   
-  <!-- Carga de librería local offline -->
   <script src="js/face-api.min.js"></script>
 
   <style>
@@ -55,17 +54,17 @@
 <body>
 
 <div class="container">
-  <h2>Robot de Rescate - Telemetría y Distancia Estimada</h2>
+  <h2>Robot de Rescate - Panel Telemetría e IA</h2>
   
   <div class="header-input">
-    <input type="text" id="ipAddress" placeholder="192.168.1.10:8080/video o 192.168.4.1:81/stream">
+    <input type="text" id="ipAddress" placeholder="192.168.4.1/stream o 192.168.1.10:8080/video">
     <button onclick="conectarStream()">Conectar Video</button>
   </div>
 
   <div id="bannerAlerta" class="alert-banner status-green">🟢 ESTADO: PATRULLAJE NORMAL</div>
 
   <div class="video-container" id="stage">
-    <img id="mjpegStream" class="stream-img" crossorigin="anonymous" src="" alt="Esperando video de la cámara...">
+    <img id="mjpegStream" class="stream-img" crossorigin="anonymous" src="" alt="Esperando transmisión...">
   </div>
 
   <div class="controls">
@@ -74,7 +73,6 @@
     <button id="btnEmo" class="btn-ia" onclick="toggleIA('emocion')">EMOCIÓN [OFF]</button>
   </div>
 
-  <!-- Teclado de control de motores -->
   <div class="controls" style="margin-top: 20px;">
     <div></div><button onclick="enviarCmd('forward')">▲ AVANZAR</button><div></div>
     <button onclick="enviarCmd('left')">◄ IZQUIERDA</button>
@@ -91,12 +89,10 @@
   let modelosFaceListos = false;
   let escaneoActivo = false;
 
-  // Constante focal estimada para cámaras web de celular/ESP32 (se ajusta según tu lente)
-  // Ancho promedio de un rostro humano = 16 cm
+  // Parámetros de estimación de distancia focal
   const ANCHO_ROSTRO_REAL_CM = 16.0; 
-  const FOCAL_LENGTH = 500; // Valor de calibración estándar en píxeles
+  const FOCAL_LENGTH = 500; 
 
-  // Carga local de modelos face-api
   window.addEventListener('DOMContentLoaded', async () => {
     try {
       if (typeof faceapi !== 'undefined') {
@@ -106,10 +102,10 @@
           faceapi.nets.faceExpressionNet.loadFromUri('./models')
         ]);
         modelosFaceListos = true;
-        console.log("Modelos locales e IA cargados.");
+        console.log("Modelos offline de la IA cargados correctamente.");
       }
     } catch(e) {
-      console.error("Error al cargar modelos desde ./models/", e);
+      console.error("Error al cargar los modelos locales:", e);
     }
   });
 
@@ -131,7 +127,6 @@
     };
   }
 
-  // Bucle asíncrono para mantener procesamiento constante sin saturar CPU
   async function loopEscaneo() {
     if (!escaneoActivo) return;
 
@@ -159,7 +154,8 @@
       let distanciaCalculadaCm = 0;
 
       if (modelosFaceListos && (estadoIA.emocion || estadoIA.postura)) {
-        const opcionesTiny = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+        // Sensibilidad optimizada para la cámara ESP32-S3 (inputSize: 320, scoreThreshold: 0.35)
+        const opcionesTiny = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 });
         
         try {
           const detections = await faceapi.detectAllFaces(img, opcionesTiny)
@@ -171,11 +167,10 @@
           if (resizedDetections.length > 0) {
             deteccionRostro = true;
             
-            // Dibujar bounding box y landmarks
             faceapi.draw.drawDetections(canvas, resizedDetections);
             faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
 
-            // CÁLCULO MATEMÁTICO DE DISTANCIA
+            // Triangulación matemática de la distancia
             const box = resizedDetections[0].detection.box;
             const anchoPixeles = box.width;
             
@@ -183,7 +178,6 @@
               distanciaCalculadaCm = Math.round((ANCHO_ROSTRO_REAL_CM * FOCAL_LENGTH) / anchoPixeles);
             }
 
-            // Dibujar etiqueta de distancia sobre la cabeza
             ctx.fillStyle = '#facc15';
             ctx.font = 'bold 16px sans-serif';
             ctx.fillText(`DISTANCIA: ${distanciaCalculadaCm} cm (${(distanciaCalculadaCm/100).toFixed(2)} m)`, box.x, box.y - 10);
@@ -195,7 +189,7 @@
             }
           }
         } catch (err) {
-          console.warn("Cuadro omitido:", err);
+          console.warn("Cuadro omitido para mantener fluidez:", err);
         }
       }
 
@@ -228,7 +222,7 @@
       banner.innerText = `🔴 ¡ALERTA ROJA! VÍCTIMA A ${distancia} cm (${(distancia/100).toFixed(2)} m) | EMOCIÓN: ${emocion.toUpperCase()}`;
     } else if (estadoIA.postura && hayRostro) {
       banner.className = "alert-banner status-yellow";
-      banner.innerText = `🟡 ALERTA AMARILLA: SUJETO DETECTADO A ${distancia} cm (${(distancia/100).toFixed(2)} m)`;
+      banner.innerText = `🟡 ALERTA AMARILLA: ROSTRO DETECTADO A ${distancia} cm (${(distancia/100).toFixed(2)} m)`;
     } else if (estadoIA.objetos) {
       banner.className = "alert-banner status-green";
       banner.innerText = "🟢 PATRULLAJE Y BÚSQUEDA LOCAL ACTIVADA";
@@ -251,7 +245,7 @@
   function enviarCmd(dir) {
     if(!ipBase) return;
     fetch("http://" + ipBase + "/cmd?move=" + dir, { mode: 'no-cors' })
-      .catch(err => console.log("Comando enviado al robot: " + dir));
+      .catch(err => console.log("Comando enviado: " + dir));
   }
 </script>
 
